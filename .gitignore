@@ -8,6 +8,5 @@ __pycache__/
 /*.png
 /_*.py
 /dbg_*.txt
-/preview/
 /config.json
 
