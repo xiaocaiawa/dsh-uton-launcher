@@ -322,7 +322,7 @@ def repair(log=None):
 
 
 def start_server(bin_js, node=None):
-    """在新控制台窗口里起 dsh web（和双击 dsh-restart.cmd 一个效果）。"""
+    """在后台起 dsh web，不弹 CMD 窗口（日志走 launcher 自己记）。"""
     node = node or find_node()
     if not node:
         return None, "找不到 node.exe"
@@ -330,7 +330,7 @@ def start_server(bin_js, node=None):
         return None, "找不到入口文件：%s" % bin_js
     try:
         p = subprocess.Popen([node, bin_js, "web"], cwd=HOME,
-                             creationflags=NEW_CONSOLE)
+                             creationflags=NO_WINDOW)
         return p.pid, "已启动（PID %d）" % p.pid
     except Exception as e:
         return None, "%s: %s" % (type(e).__name__, e)

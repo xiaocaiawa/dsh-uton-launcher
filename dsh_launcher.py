@@ -336,7 +336,171 @@ class Dot(tk.Canvas):
         self._job = self.after(60, self._pulse)
 
 
+class Pill(tk.Canvas):
+    """状态条右边的提示胶囊：不确定进度时三个跳动的小点，确定进度时显示百分比。"""
+
+    def __init__(self, parent, bg="#fafbfc", height=26):
+        super().__init__(parent, height=height, bg=bg, highlightthickness=0, bd=0)
+        self._h = height
+        self._text = ""
+        self._value = None
+        self._phase = 0.0
+        self._job = None
+        self.bind("<Configure>", lambda e: self._draw())
+
+    def _draw(self):
+        w = self.winfo_width()
+        h = self._h
+        self.delete("all")
+        if w <= 6 or not self._text:
+            return
+        round_rect(self, 0, 0, w, h, h / 2.0, fill=BLUE_L, outline="#d5e6f6")
+        cy = h / 2.0
+        if self._value is None:
+            for i in range(3):
+                a = 0.28 + 0.72 * max(0.0, math.cos(self._phase - i * 0.7))
+                c = mix(BLUE_L, BLUE, a)
+                cx = 15 + i * 9
+                self.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill=c, outline=c)
+            self.create_text(48, cy, text=self._text, anchor="w", fill=BLUE,
+                             font=(FONT, 10))
+        else:
+            self.create_text(15, cy, text=self._text, anchor="w", fill=BLUE,
+                             font=(FONT, 10))
+            self.create_text(w - 13, cy, text="%d%%" % int(round(self._value * 100)),
+                             anchor="e", fill=BLUE, font=(FONT, 10, "bold"))
+
+    def _tick(self):
+        self._phase += 0.22
+        if self._phase > 6.2832:
+            self._phase -= 6.2832
+        self._draw()
+        self._job = self.after(60, self._tick)
+
+    def show(self, text, value=None):
+        self._text = text or ""
+        self._value = value
+        f = tkfont.Font(family=FONT, size=10)
+        need = f.measure(self._text) + (92 if value is None else 82)
+        self.configure(width=max(150, min(need, 470)))
+        if value is None and self._job is None:
+            self._phase = 0.0
+            self._tick()
+        elif value is not None:
+            self._stop()
+        self._draw()
+
+    def _stop(self):
+        if self._job is not None:
+            try:
+                self.after_cancel(self._job)
+            except Exception:
+                pass
+            self._job = None
+
+    def hide(self):
+        self._stop()
+        self._text = ""
+        self.delete("all")
+
+
+class Toast(tk.Frame):
+    """窗口内右下角的提示条：滑进来、停一会儿、滑出去；多个会往上叠。"""
+
+    KINDS = {"ok": (OK, "✓"), "warn": (WARN, "!"),
+             "bad": (BAD, "×"), "info": (BLUE, "i")}
+    _alive = []
+    W = 330
+    H = 56
+    GAP = 8
+    RIGHT = 22
+    BOTTOM = 62
+
+    def __init__(self, master, text, kind="info", ms=3200):
+        if kind not in self.KINDS:
+            kind = "info"
+        color, glyph = self.KINDS[kind]
+        super().__init__(master, bg=CARD, highlightbackground="#e3e8ef",
+                         highlightthickness=1)
+        self._closing = False
+        tk.Frame(self, bg=color, width=4).pack(side="left", fill="y")
+        box = tk.Frame(self, bg=CARD)
+        box.pack(side="left", fill="both", expand=True, padx=(12, 10))
+        ic = tk.Canvas(box, width=24, height=24, bg=CARD, highlightthickness=0, bd=0)
+        ic.create_oval(0, 0, 23, 23, fill=color, outline=color)
+        ic.create_text(12, 12, text=glyph, fill="#ffffff", font=(FONT, 9, "bold"))
+        ic.pack(side="left")
+        tk.Label(box, text=text, bg=CARD, fg=INK, font=(FONT, 10), anchor="w",
+                 justify="left", wraplength=self.W - 92).pack(side="left", padx=(10, 0))
+        Toast._alive.append(self)
+        self._reflow()
+        self._slide_in()
+        self._deadline = self.after(ms, self.close)
+
+    def _y_for(self, idx):
+        return -(self.BOTTOM + (self.H + self.GAP) * (idx + 1))
+
+    def _reflow(self):
+        idx = Toast._alive.index(self)
+        target = self._y_for(idx)
+        if getattr(self, "_ty", None) is None:
+            self._ty = target
+        self.place(relx=1.0, rely=1.0, anchor="se", x=-self.RIGHT,
+                   width=self.W, height=self.H, y=target)
+        if not self._closing:
+            self._ty = target
+
+    def _slide_in(self, i=0, steps=8):
+        start = self._ty + 26
+        end = self._ty
+
+        def frame(k):
+            if self._closing or not self.winfo_exists():
+                return
+            kk = k / float(steps)
+            kk = 1.0 - (1.0 - kk) ** 3
+            self.place_configure(y=int(start + (end - start) * kk))
+            if k < steps:
+                self.after(14, lambda: frame(k + 1))
+
+        frame(0)
+
+    def close(self):
+        if self._closing:
+            return
+        self._closing = True
+        try:
+            self.after_cancel(self._deadline)
+        except Exception:
+            pass
+        self._slide_out(6)
+
+    def _slide_out(self, i):
+        if i <= 0:
+            self._destroy()
+            return
+        y = self._ty + (6 - i) * 7
+        try:
+            self.place_configure(y=y)
+        except Exception:
+            pass
+        self.after(16, lambda: self._slide_out(i - 1))
+
+    def _destroy(self):
+        if self in Toast._alive:
+            Toast._alive.remove(self)
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        for t in Toast._alive:
+            t._reflow()
+            t._slide_in()
+
+
 class Bar(tk.Canvas):
+
+
     """细进度条：set_fraction 定量，start_marquee 流动光带，stop 停。"""
 
     def __init__(self, parent, bg=CARD, height=8, color=BLUE, track=TRACK):
@@ -958,9 +1122,8 @@ class App:
         self.status_text = tk.Label(bar, text="就绪", bg="#fafbfc", fg=DIM, font=(FONT, 10),
                                     anchor="w")
         self.status_text.pack(side="left", padx=20)
-        self.bar = Bar(bar, bg="#fafbfc", height=8)
-        self.bar.configure(width=260)
-        self.bar.pack(side="right", padx=20)
+        self.pill = Pill(bar, bg="#fafbfc", height=26)
+        self.pill.pack(side="right", padx=20)
 
     # ------------------------------------------------------------ 三个页
     def build_pages(self, parent):
@@ -1149,8 +1312,10 @@ class App:
             self.root.clipboard_clear()
             self.root.clipboard_append("1061055039")
             self.say("群号 1061055039 已复制到剪贴板")
+            self.toast("QQ 群号 1061055039 已复制", "ok")
         except Exception as e:
             self.say("复制失败：%s" % e)
+            self.toast("复制失败：%s" % e, "bad")
 
     def page_settings(self):
         page = tk.Frame(self.content, bg=PAGE_BG)
@@ -1214,6 +1379,8 @@ class App:
         good, err = C.save_settings(self.cfg)
         self.say(("设置 %s = %s" % (key, value)) if good
                  else ("设置保存失败：%s" % err))
+        self.toast("设置已保存" if good else ("保存失败：%s" % err),
+                   "ok" if good else "bad")
 
     def on_check_update(self):
         self.spawn(self._do_check_update, "update")
@@ -1376,6 +1543,8 @@ class App:
                     self.close_cover()
                 elif k == "started":
                     self.refresh_status()
+                    if not m.get("quiet"):
+                        self.toast("DSH 已经起来了", "ok")
         except queue.Empty:
             pass
         self.root.after(80, self.pump)
@@ -1396,14 +1565,18 @@ class App:
 
     def show_prog(self, text, value):
         if text is None:
-            self.bar.stop()
+            self.pill.hide()
             self.update_status_text()
             return
-        if value is None:
-            self.bar.start_marquee()
-        else:
-            self.bar.set_fraction(float(value))
+        self.pill.show(text, None if value is None else float(value))
         self.status_text.configure(text=text)
+
+    def toast(self, text, kind="info", ms=3200):
+        """右下角浮一条提示。"""
+        try:
+            Toast(self.root, text, kind, ms)
+        except Exception:
+            pass
 
     def set_controls(self, name, idle_now):
         m = {"check": self.btn_check, "install": self.btn_install,
@@ -1476,6 +1649,10 @@ class App:
         self.refresh_status()
         if self._n % 12 == 0:
             self.refresh_peak()
+        up = bool(getattr(self, "st", {}).get("running"))
+        if getattr(self, "_was_up", None) is True and not up:
+            self.toast("DSH 服务停了 —— 点「启动」重新拉起来", "warn", 7000)
+        self._was_up = up
         self.root.after(5000, self.tick)
 
     def plugin_check_job(self):
@@ -1607,6 +1784,7 @@ class App:
             self.sum_warn.configure(text="")
             self.sum_bad.configure(text="")
             self.sum_note.configure(text="")
+            self.toast("体检失败：" + err, "bad")
             return
         for n, r in enumerate(rows):
             label = {"ok": "正常", "warn": "有警告", "bad": "有问题"}[r["level"]]
@@ -1622,6 +1800,8 @@ class App:
         self.sum_bad.configure(text="有问题 %d" % n_bad)
         self.sum_note.configure(text="共 %d 个插件" % len(rows))
         self.show_detail_lines(summary.splitlines())
+        self.toast("体检完成：正常 %d，警告 %d，有问题 %d" % (n_ok, n_warn, n_bad),
+                   "bad" if n_bad else ("warn" if n_warn else "ok"))
 
     def show_detail_lines(self, lines):
         self.detail.configure(state="normal")
@@ -1909,6 +2089,7 @@ class App:
     def show_report(self, rows, err):
         if err:
             self.say("❌修复失败：%s" % err)
+            self.toast("修复失败：" + err, "bad")
             messagebox.showerror("修复 DSH", "修复失败：\n\n%s" % err, parent=self.root)
             return
         lines = []
@@ -1917,6 +2098,7 @@ class App:
         bad = [r for r in rows if not r[2]]
         head = "全部正常" if not bad else "%d 项要注意" % len(bad)
         self.say("修复结果：%s" % head)
+        self.toast("修复完成：" + head, "ok" if not bad else "warn")
         messagebox.showinfo("修复 DSH · %s" % head, "\n".join(lines), parent=self.root)
 
     def on_restart(self):
