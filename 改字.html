@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>启动器文字 · 改字</title>
+<style>
+  :root { --blue:#1370b1; --blue-l:#e9f4fc; --ink:#26282b; --dim:#787d85; --line:#e6eaef; --bg:#eef1f5; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.6 "Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif; }
+  header { position:sticky; top:0; z-index:9; background:#23262b; color:#fff;
+           padding:14px 22px; display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:17px; font-weight:700; letter-spacing:.5px; }
+  header .tip { color:#9aa0a8; font-size:12.5px; }
+  .wrap { max-width:1100px; margin:0 auto; padding:18px 22px 80px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px;
+          box-shadow:0 1px 3px rgba(20,40,70,.06); padding:6px 18px 14px; margin:16px 0; }
+  .card > h2 { font-size:13px; color:var(--blue); margin:14px 0 6px; letter-spacing:1px; }
+  .row { display:flex; align-items:center; gap:10px; padding:5px 0 5px 8px;
+         border-left:3px solid transparent; }
+  .row.changed { border-left-color:var(--blue); background:var(--blue-l); border-radius:0 8px 8px 0; }
+  .no { min-width:34px; color:#a3a8b0; font-size:12px; font-variant-numeric:tabular-nums; }
+  .name { min-width:190px; color:var(--dim); font-size:12.5px; }
+  input[type=text] { flex:1; min-width:200px; padding:7px 10px; font:13.5px/1.4 Consolas,"Microsoft YaHei UI",monospace;
+          color:var(--ink); background:#fbfcfe; border:1px solid #dde3ea; border-radius:8px; outline:none; }
+  input[type=text]:focus { border-color:var(--blue); background:#fff; box-shadow:0 0 0 2px var(--blue-l); }
+  .sub { display:flex; flex-wrap:wrap; gap:8px 14px; padding:4px 0 4px 42px; }
+  .sub .one { display:flex; align-items:center; gap:6px; }
+  .sub .tag { color:#a3a8b0; font-size:12px; min-width:42px; }
+  .sub input { min-width:150px; flex:0 1 auto; width:210px; }
+  footer { position:fixed; left:0; right:0; bottom:0; background:#fff; border-top:1px solid var(--line);
+           padding:10px 22px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  button { font:13px/1 "Microsoft YaHei UI",sans-serif; padding:8px 16px; border-radius:8px;
+           border:1px solid #d8dee6; background:#fff; color:var(--ink); cursor:pointer; }
+  button:hover { background:#f2f5f9; }
+  button.main { background:var(--blue); border-color:var(--blue); color:#fff; }
+  button.main:hover { background:#0e5b90; }
+  label.ck { display:flex; align-items:center; gap:6px; color:var(--dim); font-size:12.5px; }
+  #out { position:fixed; left:0; right:0; bottom:58px; background:#fbfcfe; border-top:1px solid var(--line);
+         padding:12px 22px; display:none; }
+  #out.on { display:block; }
+  #out textarea { width:100%; height:170px; padding:10px; font:13px/1.6 Consolas,monospace;
+         border:1px solid #dde3ea; border-radius:8px; background:#fff; color:var(--ink); resize:vertical; }
+  #out .btns { display:flex; gap:10px; margin-top:8px; align-items:center; }
+  .ok { color:var(--blue); font-size:12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>启动器文字 · 改字</h1>
+  <span class="tip">每行左边是现在界面上的字，直接在框里改成你要的。不想改的别动。改完点下面的「生成结果」，复制那段发给我就行。</span>
+</header>
+
+<div class="wrap" id="list"></div>
+
+<footer>
+  <button class="main" id="gen">生成结果</button>
+  <button id="reset">全部还原</button>
+  <label class="ck"><input type="checkbox" id="only" checked> 只列我改过的</label>
+  <span class="ok" id="cnt"></span>
+</footer>
+
+<div id="out">
+  <textarea id="result" readonly></textarea>
+  <div class="btns">
+    <button class="main" id="copy">复制这段</button>
+    <button id="close">收起</button>
+    <span class="ok" id="copied"></span>
+  </div>
+</div>
+
+<script>
+const DATA = [
+  ["顶栏", 1, "大标题（窗口标题也是它）", ["DSH 启动器"]],
+  ["顶栏", 2, "副标题", ["本地宿主 · 版本切换 · 插件体检"]],
+  ["顶栏", 3, "右上角那行", ["下次切换 10-16 18:00"]],
+  ["顶栏", 4, "右上角胶囊的四种写法", ["高峰时段 · 全价", "空闲时段 · 半价", "读取中…", "读不到峰谷配置"], ["高峰", "空闲", "读取中", "读不到"]],
+
+  ["左侧导航", 5, "导航第一项", ["服务"]],
+  ["左侧导航", 6, "导航第二项", ["版本与更新"]],
+  ["左侧导航", 7, "导航第三项", ["插件体检"]],
+
+  ["底部状态条", 8, "平时显示", ["就绪"]],
+  ["底部状态条", 9, "界面还没好时", ["正在准备界面…"]],
+  ["底部状态条", 10, "检测插件到第几个", ["正在看 3/17：dsh-phone"]],
+  ["底部状态条", 11, "开始检测插件", ["开始检测插件…"]],
+  ["底部状态条", 12, "下载版本时", ["正在下载 0.2.1-alpha.4…　已获取 12 个包"]],
+  ["底部状态条", 13, "查远端版本时", ["正在查远端版本…"]],
+
+  ["加载页", 14, "标题", ["DSH 启动器"]],
+  ["加载页", 15, "第一句", ["正在启动…"]],
+  ["加载页", 16, "第二句", ["正在检查运行环境…"]],
+  ["加载页", 17, "第三句", ["正在读取本地版本…"]],
+  ["加载页", 18, "第四句", ["正在询问远端版本…"]],
+  ["加载页", 19, "第五句", ["正在读取峰谷配置…"]],
+  ["加载页", 20, "底部小字", ["本地宿主 · 版本切换 · 插件体检"]],
+
+  ["服务页", 21, "卡片标题", ["宿主服务"]],
+  ["服务页", 22, "状态大字", ["检查中…", "运行中", "已停止"], ["检查中", "运行中", "已停止"]],
+  ["服务页", 23, "状态行", ["PID 8332 · 端口 3080 · 版本 0.2.0-rc.2（npx 缓存） · 启动于 10-16 17:24:24"]],
+  ["服务页", 24, "没在跑时的说明", ["端口 3080 上没有进程在监听"]],
+  ["服务页", 25, "四个按钮", ["启动", "停止", "重启", "打开网页"], ["按钮1", "按钮2", "按钮3", "按钮4"]],
+  ["服务页", 26, "小节标题", ["明细"]],
+  ["服务页", 27, "七个字段名", ["进程号", "监听端口", "运行版本", "版本来源", "启动于", "入口文件", "命令行"],
+        ["1", "2", "3", "4", "5", "6", "7"]],
+
+  ["版本页", 28, "卡片标题", ["版本与更新"]],
+  ["版本页", 29, "三个小标签", ["版本", "更新", "通道"], ["1", "2", "3"]],
+  ["版本页", 30, "第一排二选一", ["自动选（追最新）", "手动选"], ["左", "右"]],
+  ["版本页", 31, "第二排二选一", ["自动更新", "手动更新"], ["左", "右"]],
+  ["版本页", 32, "第三排二选一", ["正式版", "含测试版"], ["左", "右"]],
+  ["版本页", 33, "三个按钮", ["检测更新", "安装 / 更新", "用这个版本启动"], ["按钮1", "按钮2", "按钮3"]],
+  ["版本页", 34, "下拉条目后面方括号里的字", ["[正式 · 已装]"]],
+  ["版本页", 35, "提示行一", ["远端　正式版 0.2.0-rc.2　测试版 0.2.1-alpha.4"]],
+  ["版本页", 36, "提示行二", ["当前跑 0.2.0-rc.2，就是目标版本"]],
+  ["版本页", 37, "提示行三", ["本地可用　0.2.0-rc.2"]],
+  ["版本页", 38, "小节标题和右边按钮", ["操作记录", "清空"], ["标题", "按钮"]],
+  ["版本页", 39, "日志空着时", ["（还没有操作记录。检测 / 安装 / 启停都会写在这里）"]],
+  ["版本页", 40, "出错时", ["检测失败：…"]],
+  ["版本页", 41, "查完远端", ["远端　正式版 0.2.0-rc.2　测试版 0.2.1-alpha.4　共 33 个版本"]],
+  ["版本页", 42, "没选版本就点安装", ["先在列表里选一个版本"]],
+  ["版本页", 43, "开始下载", ["开始安装 0.2.1-alpha.4（可能几十秒）…"]],
+  ["版本页", 44, "已有宿主要在跑", ["3080 上已有 PID 8332 在跑（版本 0.2.0-rc.2）。要换的话先点「重启」。"]],
+  ["版本页", 45, "启动成功", ["用 0.2.0-rc.2 启动（当前跑的就是它）"]],
+
+  ["插件页", 46, "卡片标题", ["插件体检"]],
+  ["插件页", 47, "结论行", ["等待检测…", "正常 14", "有警告 0", "有问题 3", "共 17 个插件", "检测失败：…"],
+        ["等待", "正常", "警告", "有问题", "总数", "失败"]],
+  ["插件页", 48, "右边那句说明", ["四层判据：依赖声明 → 打包清单 → 文件到位 → 宿主答应"]],
+  ["插件页", 49, "按钮", ["重新检测"]],
+  ["插件页", 50, "五个表头", ["插件", "结论", "在打包清单", "声明", "实际位置"], ["1", "2", "3", "4", "5"]],
+  ["插件页", 51, "结论列的值", ["正常", "有警告", "有问题"], ["正常", "警告", "有问题"]],
+  ["插件页", 52, "在打包清单列的值", ["在", "不在"], ["在", "不在"]],
+  ["插件页", 53, "详情空着时", ["（点上面任意一行，这里显示它的问题和警告）"]],
+  ["插件页", 54, "详情里的字", ["位置：", "问题", "警告", "通过"], ["位置", "小标题1", "小标题2", "小标题3"]]
+];
+
+const KEY = "dsh-launcher-words-v1";
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { saved = {}; }
+
+const list = document.getElementById("list");
+let groupEl = null, curGroup = "";
+const items = [];
+
+DATA.forEach(([group, no, name, defaults, tags]) => {
+  if (group !== curGroup) {
+    curGroup = group;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = "<h2>" + group + "</h2>";
+    list.appendChild(card);
+    groupEl = card;
+  }
+  const row = document.createElement("div");
+  row.className = "row";
+  const noEl = document.createElement("span");
+  noEl.className = "no";
+  noEl.textContent = no;
+  const nameEl = document.createElement("span");
+  nameEl.className = "name";
+  nameEl.textContent = name;
+  row.appendChild(noEl);
+  row.appendChild(nameEl);
+
+  const inputs = [];
+  if (defaults.length === 1) {
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.dataset.key = String(no);
+    inp.value = saved[inp.dataset.key] !== undefined ? saved[inp.dataset.key] : defaults[0];
+    row.appendChild(inp);
+    inputs.push({ el: inp, label: "" });
+  } else {
+    const box = document.createElement("div");
+    box.className = "sub";
+    box.style.flex = "1";
+    defaults.forEach((d, i) => {
+      const one = document.createElement("div");
+      one.className = "one";
+      const tg = document.createElement("span");
+      tg.className = "tag";
+      tg.textContent = (tags && tags[i]) ? tags[i] : String(i + 1);
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.dataset.key = no + String.fromCharCode(97 + i);
+      inp.value = saved[inp.dataset.key] !== undefined ? saved[inp.dataset.key] : d;
+      one.appendChild(tg);
+      one.appendChild(inp);
+      box.appendChild(one);
+      inputs.push({ el: inp, label: tg.textContent });
+    });
+    row.appendChild(box);
+  }
+  groupEl.appendChild(row);
+  items.push({ no: no, name: name, group: group, inputs: inputs, row: row, defaults: defaults });
+});
+
+function keyOf(it) {
+  return it.inputs.map(x => x.el.dataset.key);
+}
+
+function refresh() {
+  let n = 0;
+  items.forEach(it => {
+    let changed = false;
+    it.inputs.forEach((x, i) => {
+      const def = it.defaults[i];
+      if (x.el.value !== def) changed = true;
+      saved[x.el.dataset.key] = x.el.value;
+    });
+    it.row.classList.toggle("changed", changed);
+    if (changed) n++;
+  });
+  try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+  document.getElementById("cnt").textContent = n ? ("已改 " + n + " 条") : "";
+}
+
+list.addEventListener("input", refresh);
+refresh();
+
+document.getElementById("gen").onclick = () => {
+  const onlyChanged = document.getElementById("only").checked;
+  const lines = [];
+  items.forEach(it => {
+    const parts = [];
+    it.inputs.forEach((x, i) => {
+      if (!onlyChanged || x.el.value !== it.defaults[i]) {
+        const tag = it.inputs.length > 1 ? (x.label + "：") : "";
+        parts.push(tag + x.el.value);
+      }
+    });
+    if (parts.length) lines.push(it.no + "（" + it.group + " · " + it.name + "）→ " + parts.join("　|　"));
+  });
+  document.getElementById("result").value =
+    "启动器改字（" + lines.length + " 条）：\n" + (lines.join("\n") || "（没有改动）");
+  document.getElementById("out").classList.add("on");
+  document.getElementById("copied").textContent = "";
+};
+
+document.getElementById("copy").onclick = () => {
+  const ta = document.getElementById("result");
+  ta.removeAttribute("readonly");
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  ta.setAttribute("readonly", "readonly");
+  document.getElementById("copied").textContent = ok ? "已复制，粘到对话里发我就行" : "复制失败，手动全选复制一下";
+};
+
+document.getElementById("close").onclick = () => document.getElementById("out").classList.remove("on");
+
+document.getElementById("reset").onclick = () => {
+  if (!confirm("把所有框还原成现在的文字？")) return;
+  saved = {};
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  items.forEach(it => it.inputs.forEach((x, i) => { x.el.value = it.defaults[i]; }));
+  refresh();
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>启动器字段导图 · 改字用</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #eef1f5; color: #26282b;
+    font: 14px/1.6 "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    background: #23262b; color: #fff; padding: 14px 22px;
+    display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 9;
+  }
+  header .logo {
+    width: 28px; height: 28px; border-radius: 8px; background: #1370b1;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; flex: 0 0 auto;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: #9aa3ad; font-size: 12px; }
+  .wrap { padding: 18px 22px 60px; max-width: 1180px; margin: 0 auto; }
+  .tip {
+    background: #fff; border: 1px solid #e6eaef; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 16px; color: #5a6068; font-size: 13px;
+  }
+  .tip b { color: #1370b1; }
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    background: #fff; border: 1px solid #e6eaef; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 18px; position: sticky; top: 58px; z-index: 8;
+  }
+  button {
+    font: inherit; border: 0; border-radius: 7px; padding: 7px 15px;
+    background: #fff; color: #26282b; box-shadow: inset 0 0 0 1px #d8dee6;
+    cursor: pointer;
+  }
+  button:hover { background: #f2f5f9; }
+  button.main { background: #1370b1; color: #fff; box-shadow: none; }
+  button.main:hover { background: #0e5b90; }
+  .count { margin-left: auto; color: #7f858d; font-size: 13px; }
+  .count b { color: #1370b1; }
+
+  /* ---- 导图 ---- */
+  .root {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: #1370b1; color: #fff; font-size: 15px; font-weight: 600;
+    border-radius: 10px; padding: 10px 20px; margin-bottom: 8px;
+  }
+  .tree { padding-left: 26px; position: relative; }
+  .tree::before {
+    content: ""; position: absolute; left: 8px; top: 0; bottom: 18px;
+    width: 2px; background: #cfd8e2;
+  }
+  .branch { position: relative; margin: 14px 0; }
+  .branch::before {
+    content: ""; position: absolute; left: -18px; top: 20px;
+    width: 18px; height: 2px; background: #cfd8e2;
+  }
+  .bhead {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #e9f4fc; color: #0e5b90; font-weight: 600;
+    border-radius: 8px 8px 0 0; padding: 8px 16px; border: 1px solid #cfe4f5;
+    border-bottom: 0;
+  }
+  .bhead .no {
+    background: #1370b1; color: #fff; border-radius: 5px;
+    font-size: 11px; padding: 1px 7px; font-weight: 600;
+  }
+  .bhead .cn { color: #7f858d; font-weight: 400; font-size: 12px; }
+  .leaves {
+    background: #fff; border: 1px solid #cfe4f5; border-radius: 0 10px 10px 10px;
+    padding: 6px 0; overflow: hidden;
+  }
+  .leaf {
+    display: flex; align-items: center; gap: 12px;
+    padding: 5px 16px; border-bottom: 1px solid #f1f4f8;
+  }
+  .leaf:last-child { border-bottom: 0; }
+  .leaf.changed { background: #fffaf0; }
+  .leaf .k {
+    flex: 0 0 190px; color: #5a6068; font-size: 13px;
+  }
+  .leaf input {
+    flex: 1 1 auto; min-width: 0; font: inherit; color: #26282b;
+    border: 1px solid #e2e7ee; border-radius: 6px; padding: 5px 10px;
+    background: #fbfcfe;
+  }
+  .leaf input:focus { outline: 0; border-color: #1370b1; background: #fff; }
+  .leaf.changed input { border-color: #e8b96a; background: #fff; }
+  .leaf .was {
+    flex: 0 0 auto; color: #a3a8b0; font-size: 12px; text-decoration: line-through;
+    max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .leaf .ph { color: #b9bec6; font-size: 12px; }
+
+  #out {
+    width: 100%; height: 260px; margin-top: 16px; font: 13px/1.7 Consolas, monospace;
+    border: 1px solid #e2e7ee; border-radius: 10px; padding: 14px; background: #fff;
+    color: #26282b; display: none;
+  }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">D</div>
+  <h1>启动器字段导图</h1>
+  <div class="sub">改完点「生成结果」，复制那一段发我就行</div>
+</header>
+
+<div class="wrap">
+  <div class="tip">
+    每行左边是<b>这个字在哪儿</b>，右边是<b>现在显示的文字</b> —— 直接改右边。<br>
+    带 <b>%s</b> / <b>%d</b> 的是会被程序替换掉的坑（版本号、数字），想留就原样留着，不想要也能删。<br>
+    想清空某一行就把它删成空的。改过的行会变黄，右边会划掉原文字。
+  </div>
+
+  <div class="bar">
+    <button class="main" id="gen">生成结果</button>
+    <button id="copy">复制</button>
+    <button id="only">只看改过的</button>
+    <button id="reset">全部还原</button>
+    <span class="count">已改 <b id="n">0</b> 处 / 共 <b id="total">0</b> 处</span>
+  </div>
+
+  <div class="root">PSL-ds启动器 · 全部界面文字</div>
+  <div class="tree" id="tree"></div>
+
+  <textarea id="out" spellcheck="false"></textarea>
+</div>
+
+<script>
+const DATA = [
+  { g: "窗口与顶栏", items: [
+    ["w1", "窗口标题栏", "PSL-ds启动器"],
+    ["w2", "顶栏大标题", "PSL-ds启动器"],
+    ["w3", "顶栏副标题", ""],
+    ["w4", "胶囊·高峰", "高峰时段 当前 全价"],
+    ["w5", "胶囊·空闲", "空闲时段 当前 半价"],
+    ["w6", "胶囊·读取中", "读取..."],
+    ["w7", "胶囊·读不到", "无峰谷配置"],
+    ["w8", "胶囊·下次切换", "下次切换 %s"]
+  ]},
+  { g: "左侧导航", items: [
+    ["n1", "导航 1", "服务"],
+    ["n2", "导航 2", "版本与更新"],
+    ["n3", "导航 3", "插件体检"]
+  ]},
+  { g: "加载页（开程序那几秒）", items: [
+    ["l1", "加载页大标题", "PSL-ds启动器"],
+    ["l2", "加载页状态字", "正在启动中..."],
+    ["l3", "步骤 1", "检查运行环境…"],
+    ["l4", "步骤 2", "读取本地版本…"],
+    ["l5", "步骤 3", "询问远端版本…"],
+    ["l6", "步骤 4", "读取峰谷配置…"],
+    ["l7", "步骤 5", "准备界面"],
+    ["l8", "加载页底部小字", ""],
+    ["l9", "启动失败提示", "初始化「%s」出错：%s"]
+  ]},
+  { g: "启动 / 重启时的整页动画", items: [
+    ["c1", "点启动后的标题", "正在启动 DSH"],
+    ["c2", "点重启后的标题", "正在重启 DSH"],
+    ["c3", "动画里的状态字", "正在准备…"],
+    ["c4", "等宿主应答", "等待宿主响应…"],
+    ["c5", "宿主已在跑", "3080 上已有 PID %s 在跑（版本 %s）"],
+    ["c6", "启动成功", "✅启动完成！"],
+    ["c7", "版本挑不出来", "挑不出可用版本："]
+  ]},
+  { g: "最底下那条状态栏", items: [
+    ["s1", "平时", "就绪"],
+    ["s2", "忙的时候", "检查中…"],
+    ["s3", "检测进度", "检查... %d/%d：%s"],
+    ["s4", "检测插件", "检测插件…"],
+    ["s5", "查远端版本", "远端版本查询中…"],
+    ["s6", "插件页等待", "等待检测…"],
+    ["s7", "下载中", "正在下载 %s…"],
+    ["s8", "下载进度", "正在下载 %s…　已获取 %d 包"],
+    ["s9", "下载完成前缀", "完成："],
+    ["s10", "下载失败前缀", "失败："],
+    ["s11", "修复中", "修复中…"],
+    ["s12", "内部报错", "内部错误：%s: %s"]
+  ]},
+  { g: "服务页", items: [
+    ["v1", "卡片标题", "宿主服务"],
+    ["v2", "状态大字·跑着", "运行中"],
+    ["v3", "状态大字·没跑", "已停止"],
+    ["v4", "没进程时下面那行", "端口 %d 无进程"],
+    ["v5", "状态小字行", "PID %s · 端口 %d · 版本 %s%s · 启动于 %s"],
+    ["v6", "按钮 1", "启动"],
+    ["v7", "按钮 2", "停止"],
+    ["v8", "按钮 3", "重启"],
+    ["v9", "按钮 4", "修复DSH"],
+    ["v10", "明细小标题", "明细"],
+    ["v11", "明细行 1", "进程号"],
+    ["v12", "明细行 2", "监听端口"],
+    ["v13", "明细行 3", "运行版本"],
+    ["v14", "明细行 4", "版本来源"],
+    ["v15", "明细行 5", "启动于"],
+    ["v16", "明细行 6", "入口文件"],
+    ["v17", "明细行 7", "命令行"],
+    ["v18", "修复弹窗标题", "修复 DSH · %s"],
+    ["v19", "修复·全好", "全部正常"],
+    ["v20", "修复·有问题", "%d 项要注意"],
+    ["v21", "修复结果正文", "修复结果：%s"],
+    ["v22", "修复失败的框", "修复失败：\n\n%s"],
+    ["v23", "修复失败写日志", "❌修复失败：%s"]
+  ]},
+  { g: "版本与更新页", items: [
+    ["u1", "卡片标题", "版本与更新"],
+    ["u2", "标签 1", "版本"],
+    ["u3", "选项 1a", "自动选（追最新）"],
+    ["u4", "选项 1b", "手动选"],
+    ["u5", "标签 2", "更新"],
+    ["u6", "选项 2a", "自动更新"],
+    ["u7", "选项 2b", "手动更新"],
+    ["u8", "标签 3", "通道"],
+    ["u9", "选项 3a", "正式版"],
+    ["u10", "选项 3b", "含测试版"],
+    ["u11", "按钮 1", "检测更新"],
+    ["u12", "按钮 2", "安装 / 更新"],
+    ["u13", "按钮 3", "用这个版本启动"],
+    ["u14", "下拉里的正式版条目", "%s    [%s版%s]"],
+    ["u15", "下拉·已装", "已装"],
+    ["u16", "下拉·没装", "未装"],
+    ["u17", "下拉里的本地条目", "%s    [本地 · %s]"],
+    ["u18", "远端版本提示", "远端　正式版 %s　测试版 %s"],
+    ["u19", "远端查不到", "远端查不到：%s"],
+    ["u20", "不知道为啥", "未知原因"],
+    ["u21", "目标行第 1 种", "当前跑 %s　→　目标 %s（%s）%s"],
+    ["u22", "……后缀 a", "，本地还没装，点「安装 / 更新」"],
+    ["u23", "……后缀 b", "版本%s"],
+    ["u24", "目标行第 2 种", "当前跑 %s"],
+    ["u25", "目标行第 3 种", "目标 %s（%s）%s"],
+    ["u26", "……后缀 c", "，本地还没装"],
+    ["u27", "没版本可选", "还没挑出版本"],
+    ["u28", "本地有什么", "本地可用%s"],
+    ["u29", "日志区小标题", "操作记录"],
+    ["u30", "按钮", "清空"],
+    ["u31", "日志·查失败", "❌检测失败：%s"],
+    ["u32", "日志·没选版本", "❌请选择版本"],
+    ["u33", "日志·开始装", "开始安装 %s（大约50-1.8分钟）…"],
+    ["u34", "日志·自动装", "本地没有 %s，按自动更新设置先装上…"],
+    ["u35", "日志·要手动装", "本地没有 %s，而更新方式是「手动更新」，请先点「安装 / 更新」"],
+    ["u36", "日志·换版本重启", "用 %s 重新启动（%s）· %s"]
+  ]},
+  { g: "插件体检页", items: [
+    ["p1", "卡片标题", "插件体检"],
+    ["p2", "结论·正常", "正常 %d"],
+    ["p3", "结论·警告", "有警告 %d"],
+    ["p4", "结论·有问题", "有问题 %d"],
+    ["p5", "结论·合计", "共 %d 个插件"],
+    ["p6", "右上说明", "四层判据：依赖声明 → 打包清单 → 文件到位 → 宿主应答"],
+    ["p7", "按钮", "重新检测"],
+    ["p8", "表头 1", "插件"],
+    ["p9", "表头 2", "结论"],
+    ["p10", "表头 3", "在打包清单"],
+    ["p11", "表头 4", "声明"],
+    ["p12", "表头 5", "实际位置"],
+    ["p13", "单元格·好", "正常"],
+    ["p14", "单元格·警告", "有警告"],
+    ["p15", "单元格·坏", "有问题"],
+    ["p16", "打包清单单元格·在", "在"],
+    ["p17", "详情区占位字", "(点上面任意一行，这里显示它的问题和警告)"],
+    ["p18", "详情·位置", "位置：%s"],
+    ["p19", "详情小标题·警告", "警告"],
+    ["p20", "详情小标题·没问题", "通过"],
+    ["p21", "检测失败", "检测失败："]
+  ]}
+];
+
+const KEY = "dsh-launcher-fields-v1";
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { saved = {}; }
+
+const tree = document.getElementById("tree");
+const totalEl = document.getElementById("total");
+const nEl = document.getElementById("n");
+const out = document.getElementById("out");
+let onlyChanged = false;
+let total = 0;
+
+DATA.forEach(function (grp, gi) {
+  const b = document.createElement("div");
+  b.className = "branch";
+  const head = document.createElement("div");
+  head.className = "bhead";
+  head.innerHTML = '<span class="no">' + (gi + 1) + '</span>' + grp.g +
+                   '<span class="cn">' + grp.items.length + ' 处</span>';
+  b.appendChild(head);
+  const box = document.createElement("div");
+  box.className = "leaves";
+  grp.items.forEach(function (it) {
+    total++;
+    const id = it[0], k = it[1], v = it[2];
+    const row = document.createElement("div");
+    row.className = "leaf";
+    row.dataset.id = id;
+    const lab = document.createElement("div");
+    lab.className = "k";
+    lab.textContent = k;
+    const inp = document.createElement("input");
+    inp.value = (saved[id] !== undefined) ? saved[id] : v;
+    inp.dataset.orig = v;
+    inp.spellcheck = false;
+    if (v === "") inp.placeholder = "（现在是空的，想填就写）";
+    const was = document.createElement("div");
+    was.className = "was";
+    const sync = function () {
+      const changed = inp.value !== v;
+      row.classList.toggle("changed", changed);
+      was.textContent = changed ? v || "（空）" : "";
+      if (changed) saved[id] = inp.value; else delete saved[id];
+      localStorage.setItem(KEY, JSON.stringify(saved));
+      const n = Object.keys(saved).length;
+      nEl.textContent = n;
+      if (onlyChanged) row.classList.toggle("hide", !changed);
+    };
+    inp.addEventListener("input", sync);
+    row.appendChild(lab);
+    row.appendChild(inp);
+    row.appendChild(was);
+    box.appendChild(row);
+    if (saved[id] !== undefined && saved[id] !== v) row.classList.add("changed");
+  });
+  b.appendChild(box);
+  tree.appendChild(b);
+});
+
+totalEl.textContent = total;
+nEl.textContent = Object.keys(saved).length;
+
+document.getElementById("gen").addEventListener("click", function () {
+  const lines = [];
+  DATA.forEach(function (grp, gi) {
+    const hit = grp.items.filter(function (it) { return saved[it[0]] !== undefined; });
+    if (!hit.length) return;
+    lines.push("【" + (gi + 1) + " · " + grp.g + "】");
+    hit.forEach(function (it) {
+      lines.push("  " + it[1] + "：" + (it[2] || "（空）") + "  →  " + (saved[it[0]] || "（清空）"));
+    });
+  });
+  out.value = lines.length ? lines.join("\n") : "（你还没改任何一处）";
+  out.style.display = "block";
+  out.scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
+
+document.getElementById("copy").addEventListener("click", function () {
+  if (out.style.display === "none") document.getElementById("gen").click();
+  out.select();
+  try {
+    document.execCommand("copy");
+    this.textContent = "复制好了";
+  } catch (e) {
+    this.textContent = "手动 Ctrl+C";
+  }
+  const btn = this;
+  setTimeout(function () { btn.textContent = "复制"; }, 1400);
+});
+
+document.getElementById("only").addEventListener("click", function () {
+  onlyChanged = !onlyChanged;
+  this.textContent = onlyChanged ? "看全部" : "只看改过的";
+  document.querySelectorAll(".leaf").forEach(function (row) {
+    const id = row.dataset.id;
+    row.classList.toggle("hide", onlyChanged && saved[id] === undefined);
+  });
+});
+
+document.getElementById("reset").addEventListener("click", function () {
+  if (!confirm("把所有改动还原成原来的文字？")) return;
+  saved = {};
+  localStorage.removeItem(KEY);
+  location.reload();
+});
+</script>
+</body>
+</html>

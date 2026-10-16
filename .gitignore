@@ -1,0 +1,13 @@
+﻿versions/
+build/
+build2/
+dist/
+__pycache__/
+*.spec
+*.pyc
+/*.png
+/_*.py
+/dbg_*.txt
+/preview/
+/config.json
+
