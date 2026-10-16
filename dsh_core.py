@@ -323,8 +323,8 @@ def repair(log=None):
     return out
 
 
-def start_server(bin_js, node=None):
-    """在后台起 dsh web，不弹 CMD 窗口（日志走 launcher 自己记）。"""
+def start_server(bin_js, node=None, hide=True):
+    """在后台起 dsh web。hide=True 时不弹 CMD 窗口（日志走 launcher 自己记）。"""
     node = node or find_node()
     if not node:
         return None, "找不到 node.exe"
@@ -332,7 +332,7 @@ def start_server(bin_js, node=None):
         return None, "找不到入口文件：%s" % bin_js
     try:
         p = subprocess.Popen([node, bin_js, "web"], cwd=HOME,
-                             creationflags=NO_WINDOW)
+                             creationflags=(NO_WINDOW if hide else NEW_CONSOLE))
         return p.pid, "已启动（PID %d）" % p.pid
     except Exception as e:
         return None, "%s: %s" % (type(e).__name__, e)
@@ -834,6 +834,11 @@ DEFAULT_SETTINGS = {
     "compat": False,
     "open_mode": "browser",
     "check_update": True,
+    "topmost": True,
+    "hide_cmd": True,
+    "stop_on_exit": False,
+    "keep_log": 500,
+    "confirm_repair": True,
 }
 
 

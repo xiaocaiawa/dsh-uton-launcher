@@ -923,6 +923,7 @@ class App:
 
     def __init__(self, root):
         self.root = root
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.q = queue.Queue()
         self.cfg = C.load_config()
         self.local = {}
@@ -1049,6 +1050,12 @@ class App:
         self.show_peak(self.peak)
         self.show_versions()
         self.on_plugin_check()
+        try:
+            self.root.attributes("-topmost", bool(self.cfg.get("topmost", True)))
+        except tk.TclError:
+            pass
+        if self.cfg.get("check_update", True):
+            self.root.after(1500, self.on_check_update)
         self.root.after(5000, self.tick)
 
     # ------------------------------------------------------------ 主界面骨架
@@ -1370,6 +1377,48 @@ class App:
         self.seg_compat.pack(side="left", padx=(10, 0))
         note("卡的时候打开：降低动画帧率、关掉镰子动画")
 
+        r = row("窗口置顶")
+        self.seg_top = Segmented(r, [("关", "off"), ("开 总在最前", "on")],
+                                 "on" if self.cfg.get("topmost", True) else "off",
+                                 lambda v: self.on_setting("topmost", v == "on"))
+        self.seg_top.pack(side="left", padx=(10, 0))
+        note("关掉以后启动器可以被别的窗口盖住")
+
+        r = row("隐藏 CMD")
+        self.seg_hide = Segmented(r, [("关 显示黑窗", "off"), ("开 后台跑", "on")],
+                                  "on" if self.cfg.get("hide_cmd", True) else "off",
+                                  lambda v: self.on_setting("hide_cmd", v == "on"))
+        self.seg_hide.pack(side="left", padx=(10, 0))
+        note("开 = 启动 DSH 时不弹那个黑色命令行窗口")
+
+        r = row("日志行数")
+        self.seg_log = Segmented(r, [("200 行", 200), ("500 行", 500), ("2000 行", 2000)],
+                                 int(self.cfg.get("keep_log", 500)),
+                                 lambda v: self.on_setting("keep_log", int(v)))
+        self.seg_log.pack(side="left", padx=(10, 0))
+        note("操作记录留多少行，多了自动丢最旧的")
+
+        r = row("退出时")
+        self.seg_exit = Segmented(r, [("留着 DSH 跑", "off"), ("停掉 DSH", "on")],
+                                  "on" if self.cfg.get("stop_on_exit") else "off",
+                                  lambda v: self.on_setting("stop_on_exit", v == "on"))
+        self.seg_exit.pack(side="left", padx=(10, 0))
+        note("关掉启动器时，要不要把 DSH 宿主也一起停掉")
+
+        r = row("启动时")
+        self.seg_chk = Segmented(r, [("关", "off"), ("查更新", "on")],
+                                 "on" if self.cfg.get("check_update", True) else "off",
+                                 lambda v: self.on_setting("check_update", v == "on"))
+        self.seg_chk.pack(side="left", padx=(10, 0))
+        note("启动器一打开就去仓库问有没有新版本")
+
+        r = row("配置文件")
+        Btn(r, "打开配置目录", self.on_open_cfg, "plain", padx=14,
+            pady=6).pack(side="left", padx=(10, 0))
+        Btn(r, "恢复默认设置", self.on_reset_settings, "danger", padx=14,
+            pady=6).pack(side="left", padx=(10, 0))
+        note("设置存在 ~/dsh-launcher/settings.json，动画参数在 mine.json")
+
         r = row("启动器更新")
         tk.Label(r, text="当前 v" + C.APP_VER, bg=CARD, fg=DIM,
                  font=(FONT, 10)).pack(side="left", padx=(10, 0))
@@ -1390,11 +1439,56 @@ class App:
 
     def on_setting(self, key, value):
         self.cfg[key] = value
+        if key == "topmost":
+            try:
+                self.root.attributes("-topmost", bool(value))
+            except tk.TclError:
+                pass
         good, err = C.save_settings(self.cfg)
         self.say(("设置 %s = %s" % (key, value)) if good
                  else ("设置保存失败：%s" % err))
         self.toast("设置已保存" if good else ("保存失败：%s" % err),
                    "ok" if good else "bad")
+
+    def on_close(self):
+        if self.cfg.get("stop_on_exit") and (self.last_status or {}).get("running"):
+            try:
+                C.stop_server()
+            except Exception:
+                pass
+        self.root.destroy()
+
+    def on_open_cfg(self):
+        d = os.path.dirname(C.SETTINGS_PATH)
+        try:
+            if not os.path.isdir(d):
+                os.makedirs(d)
+            os.startfile(d)
+            self.say("已打开 " + d)
+        except Exception as e:
+            self.toast("打开目录失败：%s" % e, "bad")
+
+    def on_reset_settings(self):
+        self.cfg = dict(C.DEFAULT_SETTINGS)
+        C.save_settings(self.cfg)
+        try:
+            self.root.attributes("-topmost", bool(self.cfg.get("topmost", True)))
+        except tk.TclError:
+            pass
+        for seg, key, on_val in ((getattr(self, "seg_top", None), "topmost", True),
+                                 (getattr(self, "seg_hide", None), "hide_cmd", True),
+                                 (getattr(self, "seg_log", None), "keep_log", 500),
+                                 (getattr(self, "seg_exit", None), "stop_on_exit", False),
+                                 (getattr(self, "seg_chk", None), "check_update", True),
+                                 (getattr(self, "seg_reg", None), "registry", "npmmirror"),
+                                 (getattr(self, "seg_open", None), "open_mode", "browser"),
+                                 (getattr(self, "seg_compat", None), "compat", False)):
+            if seg is None:
+                continue
+            v = self.cfg.get(key, on_val)
+            seg.set("on" if (isinstance(v, bool) and v) else ("off" if isinstance(v, bool) else v))
+        self.toast("设置已恢复默认", "ok")
+        self.say("设置已恢复默认")
 
     def on_open_dsh(self):
         mode = self.cfg.get("open_mode", "browser")
@@ -1541,6 +1635,10 @@ class App:
                     self.log.configure(state="normal")
                     self.log.insert("end", "%s  %s\n" % (ts, m["text"]))
                     self.log.see("end")
+                    keep = int(self.cfg.get("keep_log", 500) or 500)
+                    total = int(self.log.index("end-1c").split(".")[0])
+                    if total > keep + 80:
+                        self.log.delete("1.0", "%d.0" % (total - keep))
                     self.log.configure(state="disabled")
                     if m["text"] and not m["text"].startswith("  "):
                         self._last_msg = m["text"]
@@ -2224,7 +2322,7 @@ class App:
                     self.say(err)
                     return
                 self.say("✅启动完成！")
-                _, msg = C.start_server(bin_js)
+                _, msg = C.start_server(bin_js, hide=bool(self.cfg.get("hide_cmd", True)))
                 self.say(msg)
                 self.wait_host()
                 self.q.put({"kind": "started"})
@@ -2288,7 +2386,7 @@ class App:
                 if not bin_js:
                     self.say(err)
                     return
-                _, msg = C.start_server(bin_js)
+                _, msg = C.start_server(bin_js, hide=bool(self.cfg.get("hide_cmd", True)))
                 self.say("用 %s 重新启动（%s）· %s" % (want, why, msg))
                 self.wait_host()
                 self.q.put({"kind": "started"})
