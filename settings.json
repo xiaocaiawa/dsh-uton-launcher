@@ -1,6 +1,6 @@
 {
   "registry": "npmmirror",
   "compat": false,
-  "open_mode": "browser",
+  "open_mode": "app",
   "check_update": true
 }

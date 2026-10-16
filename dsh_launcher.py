@@ -1358,7 +1358,10 @@ class App:
                                   self.cfg.get("open_mode", "browser"),
                                   lambda v: self.on_setting("open_mode", v))
         self.seg_open.pack(side="left", padx=(10, 0))
-        note("点「打开网页」时怎么打开")
+        Btn(r, "立即打开", self.on_open_dsh, "main", padx=14,
+            pady=6).pack(side="left", padx=(16, 0))
+        note("本地浏览器 = 用默认浏览器；单独窗口 = Edge/Chrome 的无地址栏窗口；"
+             "APP 内运行 = 窄窗口，像手机那样贴在屏幕右下角")
 
         r = row("兼容模式")
         self.seg_compat = Segmented(r, [("关 动画全速", "off"), ("开 省性能", "on")],
@@ -1392,6 +1395,15 @@ class App:
                  else ("设置保存失败：%s" % err))
         self.toast("设置已保存" if good else ("保存失败：%s" % err),
                    "ok" if good else "bad")
+
+    def on_open_dsh(self):
+        mode = self.cfg.get("open_mode", "browser")
+        good, err = C.open_dsh(mode)
+        if good:
+            self.say("已打开 " + C.BASE_URL)
+        else:
+            self.say("打开失败：" + err)
+            self.toast("打开失败：" + err, "bad")
 
     def on_check_update(self):
         self.spawn(self._do_check_update, "update")

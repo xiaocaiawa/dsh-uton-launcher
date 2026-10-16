@@ -861,6 +861,47 @@ def save_settings(cfg):
         return False, str(e)
 
 
+def find_browser():
+    """找一个能用 --app 的 Chromium 系浏览器。"""
+    cands = [
+        os.path.join(os.environ.get("ProgramFiles", ""), "Microsoft", "Edge", "Application", "msedge.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", ""), "Microsoft", "Edge", "Application", "msedge.exe"),
+        os.path.join(os.environ.get("ProgramFiles", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
+    ]
+    for c in cands:
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
+def open_dsh(mode="browser", url=None):
+    """按设置里的打开方式打开 DSH 页面，返回 (成功, 错误)。"""
+    import webbrowser
+    url = url or BASE_URL
+    mode = mode or "browser"
+    if mode == "browser":
+        try:
+            if webbrowser.open(url):
+                return True, ""
+        except Exception as e:
+            return False, "%s: %s" % (type(e).__name__, e)
+        return False, "系统里没有可用的默认浏览器"
+    exe = find_browser()
+    if not exe:
+        return False, "没找到 Edge 或 Chrome"
+    if mode == "window":
+        args = [exe, "--app=" + url, "--window-size=1280,860", "--new-window"]
+    else:
+        args = [exe, "--app=" + url, "--window-size=430,880", "--new-window"]
+    try:
+        subprocess.Popen(args, creationflags=NO_WINDOW)
+    except Exception as e:
+        return False, "%s: %s" % (type(e).__name__, e)
+    return True, ""
+
+
 def find_git():
     for p in (r"D:\Git\cmd\git.exe",
               r"C:\Program Files\Git\cmd\git.exe",
