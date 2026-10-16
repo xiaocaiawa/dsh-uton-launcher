@@ -17,6 +17,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -826,7 +827,7 @@ def scan_plugins(progress=None):
 
 # ---------------------------------------------------------------- 配置
 
-APP_VER = "1.0.0"
+APP_VER = "1.0.1"
 REPO = "xiaocaiawa/dsh-uton-launcher"
 SETTINGS_PATH = os.path.join(os.path.expanduser("~"), "dsh-launcher", "settings.json")
 DEFAULT_SETTINGS = {
@@ -839,7 +840,34 @@ DEFAULT_SETTINGS = {
     "stop_on_exit": False,
     "keep_log": 500,
     "confirm_repair": True,
+    # ---- 外观 ----
+    "theme": "light",          # light / dark / system
+    "anim": "normal",          # off / fast / normal / slow
+    "density": "normal",       # normal / compact
+    "alpha": 100,              # 窗口不透明度 85~100
+    # ---- 下载 ----
+    "download_dir": "",        # 空 = ~/dsh-launcher/versions
+    "ask_dl_dir": False,       # 每次下载前问一次位置
+    "check_node": True,        # 下载前先检测 Node.js / npm
+    # ---- 行为 ----
+    "autostart": False,        # 开机自启（写 HKCU Run）
+    "log_autoscroll": True,
+    "safe_mode": False,        # 安全模式启动（三次确认）
+    "restore_after_safe": True,
 }
+
+DEFAULT_VERSIONS_DIR = os.path.join(LAUNCHER_DIR, "versions")
+REGISTRY_NPM = "https://registry.npmjs.org"
+REGISTRY_MIRROR = "https://registry.npmmirror.com"
+
+
+def apply_settings_to_paths(cfg):
+    """把设置里的下载源 / 下载位置同步进模块全局（其它函数运行时读这两个）。"""
+    global VERSIONS_DIR, REGISTRY
+    d = str((cfg or {}).get("download_dir") or "").strip()
+    VERSIONS_DIR = d if d else DEFAULT_VERSIONS_DIR
+    REGISTRY = REGISTRY_NPM if (cfg or {}).get("registry") == "npm" else REGISTRY_MIRROR
+    return VERSIONS_DIR, REGISTRY
 
 
 def load_settings():
@@ -851,6 +879,7 @@ def load_settings():
             cfg.update(data)
     except Exception:
         pass
+    apply_settings_to_paths(cfg)
     return cfg
 
 
@@ -985,3 +1014,188 @@ def pick_version(cfg, local, remote):
             return tag, "自动追正式版 %s" % tag
     vs = remote.get("versions") or []
     return (vs[0], "取远端最新 %s" % vs[0]) if vs else ("", "远端没有版本信息")
+
+
+# ---------------------------------------------------------------- 环境体检
+
+def _first_line(text, last=False):
+    lines = [x.strip() for x in (text or "").splitlines() if x.strip()]
+    if not lines:
+        return "?"
+    return lines[-1] if last else lines[0]
+
+
+def check_node():
+    """检测 Node.js / npm。返回 (ok, [(项目, 状态ok?, 详情)])。"""
+    rows = []
+    node = find_node()
+    npm = find_npm()
+    if node:
+        rc, out = run([node, "-v"], timeout=10)
+        rows.append(("Node.js", True, _first_line(out) if rc == 0 else "装了但跑不起来"))
+        rows.append(("node 路径", True, node))
+    else:
+        rows.append(("Node.js", False, "没找到 —— 装 DSH 之前必须先装 Node.js 18 以上"))
+    if npm:
+        rc, out = run(["cmd", "/c", npm, "-v"], timeout=20)
+        rows.append(("npm", True, _first_line(out, last=True) if rc == 0 else "装了但跑不起来"))
+        rows.append(("npm 路径", True, npm))
+    else:
+        rows.append(("npm", False, "没找到 npm.cmd（装 Node.js 时会一起装上）"))
+    d = os.path.dirname(node or "")
+    rows.append(("下载位置", True, VERSIONS_DIR))
+    try:
+        u = shutil.disk_usage(os.path.splitdrive(VERSIONS_DIR)[0] + "\\")
+        rows.append(("剩余空间", u.free > 700 * 1024 * 1024,
+                     "%.1f GB" % (u.free / 1024.0 / 1024 / 1024)))
+    except Exception:
+        pass
+    return bool(node and npm), rows
+
+
+# ---------------------------------------------------------------- 错误分析
+
+ERROR_RULES = [
+    ("EADDRINUSE", "3080 端口被别的进程占着",
+     "点服务页的「重启」（会先杀掉旧宿主），还不行就重启电脑"),
+    ("Cannot find module", "依赖没装全 / 装坏了",
+     "到「版本与更新」点「修复」，或者删掉该版本重新安装"),
+    ("is not recognized as an internal or external command", "系统 PATH 里没有这条命令",
+     "多半是 Node.js 没装好或没勾 Add to PATH"),
+    ("init.tcl", "Python 的 tk 环境变量被污染（常见于从启动器里开 Python 程序）",
+     "启动器启动 DSH 前会自动清掉这些变量，重开一次即可"),
+    ("net::ERR_CONNECTION_REFUSED", "页面连不上宿主",
+     "宿主没起来：回服务页点「启动」，或点「修复DSH」"),
+    ("EPERM", "权限被拒 / 文件被占用",
+     "关掉正占用该文件的老进程，或用管理员身份开一次"),
+    ("ENOENT", "找不到文件",
+     "多半是版本目录被删了，到「版本与更新」重新安装"),
+    ("Traceback (most recent call last)", "启动器自己抛了异常",
+     "把 crash.log 最后这一段发我"),
+    ("等待宿主应答超时", "宿主起来得太慢，或者被关掉了",
+     "看下有没有黑窗口一闪而过；点「修复DSH」再试"),
+    ("timeout", "某个操作超时（网络或进程没响应）",
+     "检查网络；插件体检可以在 DS 服务开着的时候再跑"),
+]
+
+CRASH_LOG = os.path.join(LAUNCHER_DIR, "crash.log")
+
+
+def read_crash_log(max_bytes=8000):
+    """读 crash.log 的尾部。"""
+    try:
+        sz = os.path.getsize(CRASH_LOG)
+        with open(CRASH_LOG, "rb") as f:
+            if sz > max_bytes:
+                f.seek(sz - max_bytes)
+            return f.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def analyze_errors(text=""):
+    """在给定文字 + crash.log 里找已知错误。返回 [(标题, 原因, 建议, 命中原文行)]。"""
+    pool = (text or "") + "\n" + read_crash_log()
+    hits = []
+    seen = set()
+    for needle, why, fix in ERROR_RULES:
+        if needle.lower() in pool.lower() and needle not in seen:
+            seen.add(needle)
+            line = ""
+            for raw in pool.splitlines():
+                if needle.lower() in raw.lower():
+                    line = raw.strip()[:120]
+                    break
+            hits.append((needle, why, fix, line))
+    return hits
+
+
+def clear_crash_log():
+    try:
+        open(CRASH_LOG, "w", encoding="utf-8").close()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------------------------------------------------------------- 开机自启
+
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "DSHLauncher"
+
+
+def _launch_cmd():
+    if getattr(sys, "frozen", False):
+        return '"%s"' % sys.executable
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    exe = pyw if os.path.isfile(pyw) else sys.executable
+    script = os.path.join(LAUNCHER_DIR, "dsh_launcher.py")
+    return '"%s" "%s"' % (exe, script)
+
+
+def set_autostart(on):
+    """写 / 删 HKCU 的 Run 项。返回 (成功, 说明)。"""
+    try:
+        import winreg
+    except Exception:
+        return False, "这个系统不支持改注册表"
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_ALL_ACCESS)
+    except Exception as e:
+        return False, "打不开注册表 Run 项：%s" % e
+    try:
+        if on:
+            winreg.SetValueEx(key, RUN_NAME, 0, winreg.REG_SZ, _launch_cmd())
+            return True, "已设为开机自启"
+        try:
+            winreg.DeleteValue(key, RUN_NAME)
+        except FileNotFoundError:
+            pass
+        return True, "已取消开机自启"
+    except Exception as e:
+        return False, str(e)
+    finally:
+        try:
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+
+def autostart_state():
+    """注册表里现在有没有自启项。返回 (True/False/None, 当前值)。"""
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ)
+    except Exception:
+        return None, ""
+    try:
+        val, _t = winreg.QueryValueEx(key, RUN_NAME)
+        return True, val
+    except FileNotFoundError:
+        return False, ""
+    except Exception:
+        return None, ""
+    finally:
+        try:
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------- 安全模式
+
+def safe_mode_report():
+    """安全模式启动前的现状：把「会动手的地方」列清楚（不执行任何修改）。"""
+    rows = []
+    prof = load_profile()
+    bundles = profile_bundles()
+    rows.append(("插件清单", "%d 项" % len(bundles)))
+    rows.append(("profile/config.json", "读得到" if prof else "读不到（会用默认值）"))
+    d = trusted_list()
+    rows.append(("已信任插件", "%d 个" % len(d)))
+    rows.append(("插件目录", PROFILE_NM if os.path.isdir(PROFILE_NM) else "还没有 node_modules"))
+    bad = env_pollution()
+    rows.append(("环境变量污染", "有：%s" % "、".join(sorted(bad)) if bad else "没有"))
+    pids = listening_pids(PORT)
+    rows.append(("3080 端口", "被 PID %s 占着" % "、".join(str(p) for p in pids) if pids else "空闲"))
+    return rows

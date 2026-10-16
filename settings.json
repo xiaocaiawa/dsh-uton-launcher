@@ -2,5 +2,10 @@
   "registry": "npmmirror",
   "compat": false,
   "open_mode": "app",
-  "check_update": true
+  "check_update": true,
+  "topmost": true,
+  "hide_cmd": true,
+  "stop_on_exit": false,
+  "keep_log": 2000,
+  "confirm_repair": true
 }

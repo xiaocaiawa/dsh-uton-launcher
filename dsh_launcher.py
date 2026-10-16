@@ -15,6 +15,7 @@ import math
 import os
 import queue
 import random
+import subprocess
 import sys
 import threading
 import time
@@ -29,26 +30,136 @@ import dsh_core as C
 
 # ---------------------------------------------------------------- 配色与字体
 
-BLUE = "#1370b1"        # PCL 主题色
-BLUE_D = "#0e5b90"      # 按下
-BLUE_L = "#e9f4fc"      # 选中底
-TITLE_BG = "#23262b"    # 标题栏 / 加载页底
+def _system_dark():
+    """Windows 的「应用使用浅色/深色主题」设置。"""
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                           r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        try:
+            v, _t = winreg.QueryValueEx(k, "AppsUseLightTheme")
+        finally:
+            winreg.CloseKey(k)
+        return int(v) == 0
+    except Exception:
+        return False
+
+
+def _theme_mode():
+    try:
+        pref = str(C.load_settings().get("theme", "light"))
+    except Exception:
+        pref = "light"
+    if pref == "system":
+        return "dark" if _system_dark() else "light"
+    return "dark" if pref == "dark" else "light"
+
+
+# 两套配色。所有颜色都从这里取 —— 想加深色只改这张表。
+PALETTE = {
+    "light": {
+        "BLUE": "#1370b1", "BLUE_D": "#0e5b90", "BLUE_L": "#e9f4fc",
+        "TITLE_BG": "#23262b", "NAV_BG": "#ffffff", "PAGE_BG": "#eef1f5",
+        "CARD": "#ffffff", "SHADOW": "#e6eaf0", "LINE": "#e6eaef",
+        "INK": "#26282b", "DIM": "#787d85", "FAINT": "#a3a8b0",
+        "OK": "#2e9e4f", "OK_LIGHT": "#8fd6a4", "WARN": "#d98324", "BAD": "#d64545",
+        "TRACK": "#e6eaef",
+        "SOFT": "#fafbfc", "SOFT2": "#fafafa", "SOFT_ODD": "#fafbfd",
+        "BTN": "#ffffff", "BTN_LINE": "#d8dee6", "BTN_HOVER": "#f2f5f9",
+        "OFF_BG": "#f4f6f8", "OFF_FG": "#b9bec6", "OFF_LINE": "#eaeef3",
+        "FIELD": "#fafafa",
+        "DANGER_BG": "#fdeaea", "DANGER_FG": "#b73a3a",
+        "DANGER_LINE": "#f6d5d5", "DANGER_HOVER": "#f9dede",
+        "SEG_LINE": "#e2e7ee", "SEG_HOVER": "#f5f7fa",
+        "PILL_EDGE": "#d5e6f6", "BADGE_BG": "#333333", "BADGE_FG": "#cccccc",
+        "TOAST_EDGE": "#e3e8ef", "TOP_EDGE": "#3a3f47", "TOP_DIM": "#9aa0a8",
+    },
+    "dark": {
+        "BLUE": "#4a9ede", "BLUE_D": "#3a86c0", "BLUE_L": "#1e3a52",
+        "TITLE_BG": "#15181d", "NAV_BG": "#1c2027", "PAGE_BG": "#12151a",
+        "CARD": "#20242b", "SHADOW": "#0d0f13", "LINE": "#2c323b",
+        "INK": "#e7eaf0", "DIM": "#98a0ac", "FAINT": "#6c757f",
+        "OK": "#4fbf72", "OK_LIGHT": "#7fd39b", "WARN": "#e0a04a", "BAD": "#e26060",
+        "TRACK": "#2c323b",
+        "SOFT": "#1a1e24", "SOFT2": "#1a1e24", "SOFT_ODD": "#1e222a",
+        "BTN": "#2a3038", "BTN_LINE": "#3a424c", "BTN_HOVER": "#343c46",
+        "OFF_BG": "#242931", "OFF_FG": "#5d666f", "OFF_LINE": "#2c323b",
+        "FIELD": "#1a1e24",
+        "DANGER_BG": "#3a2020", "DANGER_FG": "#e88b8b",
+        "DANGER_LINE": "#4d2a2a", "DANGER_HOVER": "#472626",
+        "SEG_LINE": "#343b45", "SEG_HOVER": "#2a3038",
+        "PILL_EDGE": "#24435c", "BADGE_BG": "#333a44", "BADGE_FG": "#c8cdd5",
+        "TOAST_EDGE": "#333a44", "TOP_EDGE": "#2e343d", "TOP_DIM": "#9aa3ad",
+    },
+}
+
+THEME_MODE = _theme_mode()
+_T = PALETTE[THEME_MODE]
+
+BLUE = _T["BLUE"]            # 主题色
+BLUE_D = _T["BLUE_D"]        # 按下
+BLUE_L = _T["BLUE_L"]        # 选中底
+TITLE_BG = _T["TITLE_BG"]    # 标题栏 / 加载页底
 TITLE_FG = "#ffffff"
-NAV_BG = "#ffffff"
-PAGE_BG = "#eef1f5"     # 内容区底
-CARD = "#ffffff"
-SHADOW = "#e6eaf0"      # 卡片投影
-LINE = "#e6eaef"
-INK = "#26282b"
-DIM = "#787d85"
-FAINT = "#a3a8b0"
-OK = "#2e9e4f"
-OK_LIGHT = "#8fd6a4"
-WARN = "#d98324"
-BAD = "#d64545"
-TRACK = "#e6eaef"
+NAV_BG = _T["NAV_BG"]
+PAGE_BG = _T["PAGE_BG"]      # 内容区底
+CARD = _T["CARD"]
+SHADOW = _T["SHADOW"]        # 卡片投影
+LINE = _T["LINE"]
+INK = _T["INK"]
+DIM = _T["DIM"]
+FAINT = _T["FAINT"]
+OK = _T["OK"]
+OK_LIGHT = _T["OK_LIGHT"]
+WARN = _T["WARN"]
+BAD = _T["BAD"]
+TRACK = _T["TRACK"]
+SOFT = _T["SOFT"]            # 次级底（状态条 / 日志框）
+SOFT2 = _T["SOFT2"]
+SOFT_ODD = _T["SOFT_ODD"]
+BTN = _T["BTN"]              # plain 按钮底
+BTN_LINE = _T["BTN_LINE"]
+BTN_HOVER = _T["BTN_HOVER"]
+OFF_BG, OFF_FG, OFF_LINE = _T["OFF_BG"], _T["OFF_FG"], _T["OFF_LINE"]
+FIELD = _T["FIELD"]
+DANGER_BG, DANGER_FG = _T["DANGER_BG"], _T["DANGER_FG"]
+DANGER_LINE, DANGER_HOVER = _T["DANGER_LINE"], _T["DANGER_HOVER"]
+SEG_LINE, SEG_HOVER = _T["SEG_LINE"], _T["SEG_HOVER"]
+PILL_EDGE = _T["PILL_EDGE"]
+BADGE_BG, BADGE_FG = _T["BADGE_BG"], _T["BADGE_FG"]
+TOAST_EDGE = _T["TOAST_EDGE"]
+TOP_EDGE, TOP_DIM = _T["TOP_EDGE"], _T["TOP_DIM"]
 FONT = "Microsoft YaHei UI"
 MONO = "Consolas"
+
+# ---------------------------------------------------------------- 动画引擎
+# 所有动画的时长都过一遍 dur()，这样「动画速度」设置能一处管全部。
+
+ANIM_SPEED = {"off": 0.0, "fast": 0.55, "normal": 1.0, "slow": 1.6}
+_ANIM = 1.0
+
+
+def set_anim(name):
+    global _ANIM
+    _ANIM = ANIM_SPEED.get(str(name), 1.0)
+    return _ANIM
+
+
+def anim_on():
+    return _ANIM > 0
+
+
+def dur(ms):
+    """把设计时长换算成这一档速度下的实际毫秒。关闭动画时返回 0。"""
+    if _ANIM <= 0:
+        return 0
+    return max(1, int(round(ms * _ANIM)))
+
+
+def ease(t):
+    """ease-out cubic：开头快、收尾慢（观感比线性顺）。"""
+    t = max(0.0, min(1.0, t))
+    return 1 - (1 - t) ** 3
 
 
 def blend(c1, c2, k):
@@ -101,6 +212,57 @@ def asset_path(name):
     return os.path.join(base, "assets", name)
 
 
+class Scroll(tk.Frame):
+    """竖向滚动容器 —— 内容塞进 .body，滚轮或右侧细条滚。"""
+
+    def __init__(self, parent, bg=PAGE_BG):
+        super().__init__(parent, bg=bg)
+        self.cv = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0,
+                            yscrollincrement=26)
+        self.bar = tk.Canvas(self, bg=bg, width=9, highlightthickness=0, bd=0)
+        self.body = tk.Frame(self.cv, bg=bg)
+        self._win = self.cv.create_window((0, 0), window=self.body, anchor="nw")
+        self.cv.pack(side="left", fill="both", expand=True)
+        self.bar.pack(side="right", fill="y")
+        self._thumb = None
+        self.body.bind("<Configure>", self._on_body)
+        self.cv.bind("<Configure>", self._on_cv)
+        self.bar.bind("<Button-1>", self._on_bar_click)
+
+    def _on_body(self, _e=None):
+        self.cv.configure(scrollregion=self.cv.bbox("all"))
+        self._paint_bar()
+
+    def _on_cv(self, ev):
+        self.cv.itemconfigure(self._win, width=ev.width)
+        self._paint_bar()
+
+    def _paint_bar(self):
+        self.bar.delete("all")
+        h = self.bar.winfo_height()
+        if h <= 4:
+            return
+        first, last = self.cv.yview()
+        if last - first >= 0.999:
+            return
+        y1 = first * h
+        y2 = max(last * h, y1 + 28)
+        round_rect(self.bar, 2.5, y1, 6.5, y2, 2, fill=FAINT, outline=FAINT)
+
+    def _on_bar_click(self, ev):
+        h = max(1, self.bar.winfo_height())
+        self.cv.yview_moveto(max(0.0, min(1.0, ev.y / float(h) - 0.08)))
+        self._paint_bar()
+
+    def scroll_by(self, units):
+        first, last = self.cv.yview()
+        if last - first >= 0.999:
+            return False
+        self.cv.yview_scroll(int(units), "units")
+        self._paint_bar()
+        return True
+
+
 class Card(tk.Frame):
     """圆角白卡片（带一点投影）。内容放进 .body。"""
 
@@ -143,15 +305,160 @@ class Card(tk.Frame):
         self.canvas.configure(height=ev.height + 8)
 
 
+class Ask(tk.Frame):
+    """项目内确认框：居中一张小卡片，不用系统弹窗。"""
+
+    def __init__(self, parent, title, text, on_ok, on_cancel=None,
+                 ok_text="继续", cancel_text="取消"):
+        super().__init__(parent, bg=CARD)
+        self.on_ok = on_ok
+        self.on_cancel = on_cancel
+        self._done = False
+        self.canvas = tk.Canvas(self, bg=PAGE_BG, highlightthickness=0, bd=0)
+        self.canvas.pack(fill="both", expand=True)
+        inner = tk.Frame(self.canvas, bg=CARD)
+        self._win = self.canvas.create_window((2, 2), window=inner, anchor="nw")
+        self.canvas.bind("<Configure>", lambda e: self._paint(e.width, e.height))
+
+        box = tk.Frame(inner, bg=CARD)
+        box.pack(fill="both", expand=True, padx=24, pady=22)
+        tk.Label(box, text=title, bg=CARD, fg=INK, font=(FONT, 12, "bold"),
+                 anchor="w").pack(fill="x")
+        tk.Label(box, text=text, bg=CARD, fg=DIM, font=(FONT, 10), anchor="w",
+                 justify="left", wraplength=370).pack(fill="x", pady=(9, 0))
+        bar = tk.Frame(box, bg=CARD)
+        bar.pack(fill="x", side="bottom", pady=(16, 0))
+        Btn(bar, ok_text, self._ok, "main", padx=18, pady=8).pack(side="right")
+        Btn(bar, cancel_text, self._no, "plain", padx=16,
+            pady=8).pack(side="right", padx=(0, 10))
+        self.place(relx=0.5, rely=0.44, anchor="center", width=450, height=210)
+
+    def _paint(self, w, h):
+        self.canvas.delete("shape")
+        round_rect(self.canvas, 3, 5, w - 2, h - 1, 16,
+                   fill=SHADOW, outline=SHADOW, tags="shape")
+        round_rect(self.canvas, 1, 1, w - 5, h - 5, 16,
+                   fill=CARD, outline=LINE, width=1, tags="shape")
+        self.canvas.tag_lower("shape")
+        self.canvas.itemconfigure(self._win, width=max(10, w - 8))
+
+    def _ok(self):
+        self.close()
+        if self.on_ok:
+            self.on_ok()
+
+    def _no(self):
+        self.close()
+        if self.on_cancel:
+            self.on_cancel()
+
+    def close(self):
+        if self._done:
+            return
+        self._done = True
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass
+
+
+class Panel(tk.Frame):
+    """项目内报告浮层：标题 + 正文 + 关掉。不用系统弹窗。"""
+
+    W, H = 580, 446
+
+    def __init__(self, parent, title, subtitle, lines, ok=True):
+        super().__init__(parent, bg=CARD)
+        self._done = False
+        self.canvas = tk.Canvas(self, bg=PAGE_BG, highlightthickness=0, bd=0)
+        self.canvas.pack(fill="both", expand=True)
+        inner = tk.Frame(self.canvas, bg=CARD)
+        self._win = self.canvas.create_window((2, 2), window=inner, anchor="nw")
+        self.canvas.bind("<Configure>", lambda e: self._paint(e.width, e.height))
+
+        box = tk.Frame(inner, bg=CARD)
+        box.pack(fill="both", expand=True, padx=22, pady=18)
+        head = tk.Frame(box, bg=CARD)
+        head.pack(fill="x")
+        bar = tk.Frame(head, bg=(BLUE if ok else WARN), width=4, height=16)
+        bar.pack(side="left", padx=(0, 10))
+        bar.pack_propagate(False)
+        tk.Label(head, text=title, bg=CARD, fg=INK, font=(FONT, 12, "bold"),
+                 anchor="w").pack(side="left")
+        if subtitle:
+            tk.Label(head, text=subtitle, bg=CARD, fg=FAINT,
+                     font=(FONT, 9)).pack(side="left", padx=(10, 0), pady=(3, 0))
+
+        edge = tk.Frame(box, bg=LINE)
+        edge.pack(fill="both", expand=True, pady=(12, 0))
+        wrap = tk.Frame(edge, bg=FIELD)
+        wrap.pack(fill="both", expand=True, padx=1, pady=1)
+        self.txt = tk.Text(wrap, bg=FIELD, fg=INK, font=(FONT, 10), bd=0,
+                           highlightthickness=0, wrap="word", padx=14, pady=12,
+                           height=10, spacing1=1, spacing3=4,
+                           selectbackground=BLUE_L, selectforeground=INK)
+        self.txt.pack(fill="both", expand=True)
+        self.txt.insert("1.0", "\n".join(lines) if lines else "（没有内容）")
+        self.txt.configure(state="disabled")
+        self.txt.bind("<MouseWheel>", self._wheel)
+
+        foot = tk.Frame(box, bg=CARD)
+        foot.pack(fill="x", pady=(14, 0))
+        Btn(foot, "关掉", self.close, "main", padx=20, pady=8).pack(side="right")
+        self.place(relx=0.5, rely=0.47, anchor="center", width=self.W, height=self.H)
+        self.fade_in()
+
+    def _wheel(self, ev):
+        try:
+            self.txt.yview_scroll(int(-ev.delta / 120.0), "units")
+        except tk.TclError:
+            pass
+
+    def fade_in(self):
+        """从下方 14px 滑上来（tk 没法给子控件做透明度，用位移代替）。"""
+        if not anim_on():
+            return
+        span = dur(190)
+        tick = 12
+
+        def step(elapsed):
+            if self._done or not self.winfo_exists():
+                return
+            k = 1.0 if span <= 0 else min(1.0, elapsed / float(span))
+            self.place_configure(rely=0.47 + 0.03 * (1 - ease(k)))
+            if k < 1.0:
+                self.after(tick, lambda: step(elapsed + tick))
+
+        step(0)
+
+    def _paint(self, w, h):
+        self.canvas.delete("shape")
+        round_rect(self.canvas, 3, 5, w - 2, h - 1, 16,
+                   fill=SHADOW, outline=SHADOW, tags="shape")
+        round_rect(self.canvas, 1, 1, w - 5, h - 5, 16,
+                   fill=CARD, outline=LINE, width=1, tags="shape")
+        self.canvas.tag_lower("shape")
+        self.canvas.itemconfigure(self._win, width=max(10, w - 8))
+
+    def close(self):
+        if self._done:
+            return
+        self._done = True
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass
+
+
 class Btn(tk.Canvas):
     """圆角按钮。用 set_enabled / set_text / set_kind，别用 configure(state=...)。"""
 
     KINDS = {
-        "plain":   ("#ffffff", INK, "#d8dee6", "#f2f5f9"),
+        "plain":   (BTN, INK, BTN_LINE, BTN_HOVER),
         "main":    (BLUE, "#ffffff", BLUE, BLUE_D),
-        "danger":  ("#fdeaea", "#b73a3a", "#f6d5d5", "#f9dede"),
+        "danger":  (DANGER_BG, DANGER_FG, DANGER_LINE, DANGER_HOVER),
         "ghost":   (CARD, BLUE, CARD, BLUE_L),
-        "seg_off": (CARD, DIM, "#e2e7ee", "#f5f7fa"),
+        "seg_off": (CARD, DIM, SEG_LINE, SEG_HOVER),
         "seg_on":  (BLUE, "#ffffff", BLUE, BLUE),
     }
 
@@ -180,7 +487,7 @@ class Btn(tk.Canvas):
     def _draw(self, t=None, press=False):
         fill, fg, outline, hover = self.KINDS[self._kind]
         if not self._enabled:
-            fill, fg, outline = "#f4f6f8", "#b9bec6", "#eaeef3"
+            fill, fg, outline = OFF_BG, OFF_FG, OFF_LINE
         elif self._kind != "seg_on":
             if t is None:
                 t = 1.0 if self._hover else 0.0
@@ -242,7 +549,7 @@ class Btn(tk.Canvas):
             except tk.TclError:
                 return
             if i < len(frames) - 1:
-                self.after(24, lambda: frame(i + 1))
+                self.after(dur(24), lambda: frame(i + 1))
 
         frame(0)
 
@@ -271,7 +578,7 @@ class Btn(tk.Canvas):
             except tk.TclError:
                 return
             if i < 6:
-                self.after(14, lambda: frame(i + 1))
+                self.after(dur(14), lambda: frame(i + 1))
 
         frame(0)
 
@@ -279,7 +586,7 @@ class Btn(tk.Canvas):
 class Badge(tk.Canvas):
     """胶囊标签。"""
 
-    def __init__(self, parent, text="", bg=TITLE_BG, fill="#333333", fg="#cccccc",
+    def __init__(self, parent, text="", bg=TITLE_BG, fill=BADGE_BG, fg=BADGE_FG,
                  font=(FONT, 9, "bold"), padx=11, pady=4):
         self._font_spec = font
         self._font = tkfont.Font(font=font)
@@ -339,7 +646,7 @@ class Dot(tk.Canvas):
 class Pill(tk.Canvas):
     """状态条右边的提示胶囊：不确定进度时三个跳动的小点，确定进度时显示百分比。"""
 
-    def __init__(self, parent, bg="#fafbfc", height=26):
+    def __init__(self, parent, bg=SOFT, height=26):
         super().__init__(parent, height=height, bg=bg, highlightthickness=0, bd=0)
         self._h = height
         self._text = ""
@@ -354,7 +661,7 @@ class Pill(tk.Canvas):
         self.delete("all")
         if w <= 6 or not self._text:
             return
-        round_rect(self, 0, 0, w, h, h / 2.0, fill=BLUE_L, outline="#d5e6f6")
+        round_rect(self, 0, 0, w, h, h / 2.0, fill=BLUE_L, outline=PILL_EDGE)
         cy = h / 2.0
         if self._value is None:
             for i in range(3):
@@ -428,7 +735,7 @@ class Toast(tk.Frame):
         if kind not in self.KINDS:
             kind = "info"
         color, glyph = self.KINDS[kind]
-        super().__init__(master, bg=CARD, highlightbackground="#e3e8ef",
+        super().__init__(master, bg=CARD, highlightbackground=TOAST_EDGE,
                          highlightthickness=1)
         self._closing = False
         tk.Frame(self, bg=color, width=4).pack(side="left", fill="y")
@@ -469,7 +776,7 @@ class Toast(tk.Frame):
             kk = 1.0 - (1.0 - kk) ** 3
             self.place_configure(y=int(start + (end - start) * kk))
             if k < steps:
-                self.after(14, lambda: frame(k + 1))
+                self.after(dur(14), lambda: frame(k + 1))
 
         frame(0)
 
@@ -651,7 +958,7 @@ class Segmented(tk.Canvas):
             except tk.TclError:
                 return
             if i < steps:
-                self.after(13, lambda: frame(i + 1))
+                self.after(dur(13), lambda: frame(i + 1))
 
         frame(1)
 
@@ -904,7 +1211,7 @@ class NavItem(tk.Frame):
             except tk.TclError:
                 return
             if i < steps:
-                self.after(13, lambda: step(i + 1))
+                self.after(dur(13), lambda: step(i + 1))
 
         step(1)
 
@@ -925,7 +1232,9 @@ class App:
         self.root = root
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.q = queue.Queue()
-        self.cfg = C.load_config()
+        self.vcfg = C.load_config()
+        self.settings = C.load_settings()
+        set_anim(self.settings.get("anim", "normal"))
         self.local = {}
         self.remote = None
         self.remote_err = ""
@@ -939,6 +1248,8 @@ class App:
         self.load_frame = None
         self.pages = {}
         self.peak = None
+        self.cur_page = "service"
+        self._safe_ok = False
 
         root.title("PSL-ds启动器")
         root.configure(bg=PAGE_BG)
@@ -956,24 +1267,40 @@ class App:
 
         self.build_main()
         self.build_loading()
+        self.root.bind_all("<MouseWheel>", self._on_wheel)
         self.root.after(80, self.pump)
         self.root.after(200, self.start_init)
         self.root.after(60, lambda: self._fade_win(0.0))
 
+    def _on_wheel(self, ev):
+        """滚轮只滚动当前页的滚动容器（设置页）；有浮层时先让浮层用。"""
+        for w in self.root.winfo_children():
+            if isinstance(w, Panel):
+                return
+        sc = getattr(self, "scroll_settings", None)
+        if sc is None or self.cur_page != "settings":
+            return
+        try:
+            n = int(-ev.delta / 120.0 * 3) or (-3 if ev.delta > 0 else 3)
+            sc.scroll_by(n)
+        except Exception:
+            pass
+
     def _fade_win(self, a):
-        """整窗淡入。"""
-        a = min(1.0, a + 0.09)
+        """整窗淡入（淡到「窗口透明度」设置的那个值）。"""
+        top = max(0.55, min(1.0, float(self.settings.get("alpha", 100) or 100) / 100.0))
+        a = min(top, a + 0.09)
         try:
             self.root.attributes("-alpha", a)
         except Exception:
             return
-        if a < 1.0:
-            self.root.after(16, lambda: self._fade_win(a))
+        if a < top:
+            self.root.after(dur(16), lambda: self._fade_win(a))
 
     # ------------------------------------------------------------ 加载页
     def build_loading(self):
         """底部居中的小卡片 —— 不占整页，初始化完就收走。"""
-        f = tk.Frame(self.root, bg=TITLE_BG, highlightbackground="#3a3f47",
+        f = tk.Frame(self.root, bg=TITLE_BG, highlightbackground=TOP_EDGE,
                      highlightthickness=1)
         f.place(relx=0.5, rely=1.0, anchor="s", y=-24, width=380, height=92)
         self.load_frame = f
@@ -985,10 +1312,10 @@ class App:
         col.pack(side="left", fill="both", expand=True, padx=(14, 0))
         tk.Label(col, text="PSL-ds启动器", bg=TITLE_BG, fg="#ffffff",
                  font=(FONT, 12, "bold"), anchor="w").pack(fill="x")
-        self.load_text = tk.Label(col, text="正在启动中...", bg=TITLE_BG, fg="#9aa0a8",
+        self.load_text = tk.Label(col, text="正在启动中...", bg=TITLE_BG, fg=TOP_DIM,
                                   font=(FONT, 10), anchor="w")
         self.load_text.pack(fill="x", pady=(3, 0))
-        self.load_bar = Bar(col, bg=TITLE_BG, height=4, color=BLUE, track="#3a3f47")
+        self.load_bar = Bar(col, bg=TITLE_BG, height=4, color=BLUE, track=TOP_EDGE)
         self.load_bar.pack(fill="x", pady=(8, 0))
         self.load_bar.start_marquee()
         self.ring.start()
@@ -1065,14 +1392,14 @@ class App:
             style.theme_use("clam")
         except Exception:
             pass
-        style.configure("L.TCombobox", fieldbackground="#fafafa", background=CARD,
+        style.configure("L.TCombobox", fieldbackground=FIELD, background=CARD,
                         bordercolor=LINE, arrowcolor=DIM, lightcolor=CARD, darkcolor=CARD,
                         padding=4)
-        style.map("L.TCombobox", fieldbackground=[("readonly", "#fafafa")])
+        style.map("L.TCombobox", fieldbackground=[("readonly", FIELD)])
         style.configure("L.Treeview", rowheight=31, font=(FONT, 10), fieldbackground=CARD,
                         background=CARD, bordercolor=LINE, borderwidth=0)
         style.configure("L.Treeview.Heading", font=(FONT, 10, "bold"),
-                        background="#f5f7fa", foreground=DIM, relief="flat", padding=6)
+                        background=SEG_HOVER, foreground=DIM, relief="flat", padding=6)
         style.map("L.Treeview", background=[("selected", BLUE_L)],
                   foreground=[("selected", INK)])
 
@@ -1107,14 +1434,14 @@ class App:
         logo.create_text(15, 15, text="D", fill="#ffffff", font=(FONT, 14, "bold"))
         tk.Label(left, text="PSL-ds启动器", bg=TITLE_BG, fg=TITLE_FG,
                  font=(FONT, 15, "bold")).pack(side="left", padx=(12, 0), pady=17)
-        tk.Label(left, text="", bg=TITLE_BG, fg="#8b9099",
+        tk.Label(left, text="", bg=TITLE_BG, fg=TOP_DIM,
                  font=(FONT, 10)).pack(side="left", padx=(14, 0), pady=20)
         right = tk.Frame(head, bg=TITLE_BG)
         right.pack(side="right", padx=20)
-        self.peak_badge = Badge(right, "读取...", bg=TITLE_BG, fill="#333333", fg="#cccccc",
+        self.peak_badge = Badge(right, "读取...", bg=TITLE_BG, fill=BADGE_BG, fg=BADGE_FG,
                                 padx=15, pady=6, font=(FONT, 10, "bold"))
         self.peak_badge.pack(side="right", pady=16)
-        self.peak_next = tk.Label(right, text="", bg=TITLE_BG, fg="#8b9099", font=(FONT, 10))
+        self.peak_next = tk.Label(right, text="", bg=TITLE_BG, fg=TOP_DIM, font=(FONT, 10))
         self.peak_next.pack(side="right", padx=(0, 12), pady=20)
         tk.Frame(self.shell, bg=BLUE, height=2).pack(fill="x")
 
@@ -1133,19 +1460,19 @@ class App:
         tk.Frame(parent, bg=LINE, width=1).pack(side="left", fill="y")
 
     def build_statusbar(self):
-        bar = tk.Frame(self.shell, bg="#fafbfc", height=44)
+        bar = tk.Frame(self.shell, bg=SOFT, height=44)
         bar.pack(side="bottom", fill="x")
         bar.pack_propagate(False)
         tk.Frame(bar, bg=LINE, height=1).pack(fill="x")
-        self.status_text = tk.Label(bar, text="就绪", bg="#fafbfc", fg=DIM, font=(FONT, 10),
+        self.status_text = tk.Label(bar, text="就绪", bg=SOFT, fg=DIM, font=(FONT, 10),
                                     anchor="w")
         self.status_text.pack(side="left", padx=20)
-        self.pill = Pill(bar, bg="#fafbfc", height=26)
+        self.pill = Pill(bar, bg=SOFT, height=26)
         self.pill.pack(side="right", padx=20)
 
     # ------------------------------------------------------------ 三个页
     def build_pages(self, parent):
-        self.cfg = C.load_settings()
+        self.cfg = getattr(self, "settings", None) or C.load_settings()
         self.content = tk.Frame(parent, bg=PAGE_BG)
         self.content.pack(side="left", fill="both", expand=True)
         self.pages = {"service": self.page_service(),
@@ -1211,15 +1538,15 @@ class App:
         row1.pack(fill="x")
         tk.Label(row1, text="版本", bg=CARD, fg=FAINT, font=(FONT, 10)).pack(side="left")
         self.seg_pick = Segmented(row1, [("自动选（追最新）", "auto"), ("手动选", "manual")],
-                                  self.cfg.get("pick_mode", "auto"), self.on_mode)
+                                  self.vcfg.get("pick_mode", "auto"), self.on_mode)
         self.seg_pick.pack(side="left", padx=(10, 24))
         tk.Label(row1, text="更新", bg=CARD, fg=FAINT, font=(FONT, 10)).pack(side="left")
         self.seg_upd = Segmented(row1, [("自动更新", "auto"), ("手动更新", "manual")],
-                                 self.cfg.get("update_mode", "manual"), self.on_mode)
+                                 self.vcfg.get("update_mode", "manual"), self.on_mode)
         self.seg_upd.pack(side="left", padx=(10, 24))
         tk.Label(row1, text="通道", bg=CARD, fg=FAINT, font=(FONT, 10)).pack(side="left")
         self.seg_chan = Segmented(row1, [("正式版", "latest"), ("含测试版", "alpha")],
-                                  self.cfg.get("channel", "latest"), self.on_mode)
+                                  self.vcfg.get("channel", "latest"), self.on_mode)
         self.seg_chan.pack(side="left", padx=(10, 0))
         row2 = tk.Frame(body, bg=CARD)
         row2.pack(fill="x", pady=(16, 0))
@@ -1242,7 +1569,7 @@ class App:
         self.btn_clearlog = Btn(head, "清空", self.on_clear_log, "ghost", padx=12, pady=4,
                                 font=(FONT, 10))
         self.btn_clearlog.pack(side="right")
-        self.log = tk.Text(body, height=9, bg="#fafbfc", fg="#333333", relief="flat",
+        self.log = tk.Text(body, height=9, bg=SOFT, fg=INK, relief="flat",
                            font=(FONT, 10), wrap="word", insertbackground=INK,
                            padx=14, pady=11, highlightthickness=1, highlightbackground=LINE,
                            bd=0)
@@ -1337,20 +1664,73 @@ class App:
 
     def page_settings(self):
         page = tk.Frame(self.content, bg=PAGE_BG)
-        c = Card(page, "设置")
-        c.pack(fill="x", padx=20, pady=18)
-        body = c.body
+        sc = Scroll(page, bg=PAGE_BG)
+        sc.pack(fill="both", expand=True)
+        self.scroll_settings = sc
 
-        def row(label):
-            r = tk.Frame(body, bg=CARD)
-            r.pack(fill="x")
-            tk.Label(r, text=label, bg=CARD, fg=INK, font=(FONT, 11),
-                     width=10, anchor="w").pack(side="left")
-            return r
+        def group(title):
+            c = Card(sc.body, title)
+            c.pack(fill="x", padx=20, pady=(16, 0))
+            b = c.body
 
-        def note(text):
-            tk.Label(body, text=text, bg=CARD, fg=FAINT,
-                     font=(FONT, 9)).pack(anchor="w", pady=(4, 16))
+            def row(label):
+                r = tk.Frame(b, bg=CARD)
+                r.pack(fill="x")
+                tk.Label(r, text=label, bg=CARD, fg=INK, font=(FONT, 11),
+                         width=10, anchor="w").pack(side="left")
+                return r
+
+            def note(text):
+                tk.Label(b, text=text, bg=CARD, fg=FAINT, font=(FONT, 9),
+                         anchor="w", justify="left", wraplength=640).pack(anchor="w",
+                                                                          pady=(4, 16))
+            return row, note
+
+        # ------------------------------------------------ 外观
+        row, note = group("外观")
+
+        r = row("主题")
+        self.seg_theme = Segmented(r, [("浅色", "light"), ("深色", "dark"),
+                                       ("跟随系统", "system")],
+                                   self.cfg.get("theme", "light"),
+                                   lambda v: self.on_setting("theme", v))
+        self.seg_theme.pack(side="left", padx=(10, 0))
+        Btn(r, "立即重启", self.on_relaunch, "plain", padx=12,
+            pady=6).pack(side="left", padx=(14, 0))
+        note("界面配色。深色模式要重启启动器才完全生效（启动时读一次）")
+
+        r = row("动画")
+        self.seg_anim = Segmented(r, [("关", "off"), ("快", "fast"),
+                                      ("标准", "normal"), ("慢", "slow")],
+                                  self.cfg.get("anim", "normal"),
+                                  lambda v: self.on_setting("anim", v))
+        self.seg_anim.pack(side="left", padx=(10, 0))
+        note("导航滑动、进度胶囊、卡片切换的过渡速度（立即生效）")
+
+        r = row("窗口透明")
+        self.seg_alpha = Segmented(r, [("100%", 100), ("96%", 96),
+                                       ("92%", 92), ("85%", 85)],
+                                   int(self.cfg.get("alpha", 100)),
+                                   lambda v: self.on_setting("alpha", int(v)))
+        self.seg_alpha.pack(side="left", padx=(10, 0))
+        note("调低能隐约看到后面的桌面（立即生效，仅 Windows）")
+
+        r = row("窗口置顶")
+        self.seg_top = Segmented(r, [("关", "off"), ("开 总在最前", "on")],
+                                 "on" if self.cfg.get("topmost", True) else "off",
+                                 lambda v: self.on_setting("topmost", v == "on"))
+        self.seg_top.pack(side="left", padx=(10, 0))
+        note("关掉以后启动器可以被别的窗口盖住")
+
+        r = row("兼容模式")
+        self.seg_compat = Segmented(r, [("关 动画全速", "off"), ("开 省性能", "on")],
+                                    "on" if self.cfg.get("compat") else "off",
+                                    lambda v: self.on_setting("compat", v == "on"))
+        self.seg_compat.pack(side="left", padx=(10, 0))
+        note("卡的时候打开：降低动画帧率、关掉镐子动画")
+
+        # ------------------------------------------------ 下载
+        row, note = group("下载与安装")
 
         r = row("下载源")
         self.seg_reg = Segmented(r, [("npmmirror 国内快", "npmmirror"), ("官方 npm", "npm")],
@@ -1358,6 +1738,39 @@ class App:
                                  lambda v: self.on_setting("registry", v))
         self.seg_reg.pack(side="left", padx=(10, 0))
         note("下载 DSH 版本时从哪个源拉包")
+
+        r = row("下载位置")
+        self.dl_text = tk.Label(r, text="…", bg=CARD, fg=FAINT, font=(FONT, 10))
+        self.dl_text.pack(side="left")
+        self.refresh_dl_text()
+        Btn(r, "选择…", self.on_pick_dir, "plain", padx=12,
+            pady=6).pack(side="left", padx=(12, 0))
+        Btn(r, "默认", self.on_dl_default, "plain", padx=12,
+            pady=6).pack(side="left", padx=(8, 0))
+        Btn(r, "打开", self.on_open_dl_dir, "plain", padx=12,
+            pady=6).pack(side="left", padx=(8, 0))
+        note("DSH 版本装到哪个文件夹（默认 ~/dsh-launcher/versions）")
+
+        r = row("下载前")
+        self.seg_askdl = Segmented(r, [("直接下", "off"), ("先问我位置", "on")],
+                                   "on" if self.cfg.get("ask_dl_dir") else "off",
+                                   lambda v: self.on_setting("ask_dl_dir", v == "on"))
+        self.seg_askdl.pack(side="left", padx=(10, 0))
+        note("开 = 每次装新版本之前都弹一次目录选择，避免默认存到 C 盘")
+
+        r = row("装之前")
+        self.seg_cknode = Segmented(r, [("不检测", "off"), ("检测 Node.js", "on")],
+                                    "on" if self.cfg.get("check_node") else "off",
+                                    lambda v: self.on_setting("check_node", v == "on"))
+        self.seg_cknode.pack(side="left", padx=(10, 0))
+        Btn(r, "现在检测", self.on_check_node, "plain", padx=12,
+            pady=6).pack(side="left", padx=(14, 0))
+        self.node_text = tk.Label(r, text="", bg=CARD, fg=DIM, font=(FONT, 10))
+        self.node_text.pack(side="left", padx=(12, 0))
+        note("没有 Node.js 就装不了 DSH —— 开的话会在下载前先拦一道")
+
+        # ------------------------------------------------ 行为
+        row, note = group("使用习惯")
 
         r = row("打开方式")
         self.seg_open = Segmented(r, [("本地浏览器", "browser"), ("单独窗口", "window"),
@@ -1370,33 +1783,12 @@ class App:
         note("本地浏览器 = 用默认浏览器；单独窗口 = Edge/Chrome 的无地址栏窗口；"
              "APP 内运行 = 窄窗口，像手机那样贴在屏幕右下角")
 
-        r = row("兼容模式")
-        self.seg_compat = Segmented(r, [("关 动画全速", "off"), ("开 省性能", "on")],
-                                    "on" if self.cfg.get("compat") else "off",
-                                    lambda v: self.on_setting("compat", v == "on"))
-        self.seg_compat.pack(side="left", padx=(10, 0))
-        note("卡的时候打开：降低动画帧率、关掉镰子动画")
-
-        r = row("窗口置顶")
-        self.seg_top = Segmented(r, [("关", "off"), ("开 总在最前", "on")],
-                                 "on" if self.cfg.get("topmost", True) else "off",
-                                 lambda v: self.on_setting("topmost", v == "on"))
-        self.seg_top.pack(side="left", padx=(10, 0))
-        note("关掉以后启动器可以被别的窗口盖住")
-
         r = row("隐藏 CMD")
         self.seg_hide = Segmented(r, [("关 显示黑窗", "off"), ("开 后台跑", "on")],
                                   "on" if self.cfg.get("hide_cmd", True) else "off",
                                   lambda v: self.on_setting("hide_cmd", v == "on"))
         self.seg_hide.pack(side="left", padx=(10, 0))
         note("开 = 启动 DSH 时不弹那个黑色命令行窗口")
-
-        r = row("日志行数")
-        self.seg_log = Segmented(r, [("200 行", 200), ("500 行", 500), ("2000 行", 2000)],
-                                 int(self.cfg.get("keep_log", 500)),
-                                 lambda v: self.on_setting("keep_log", int(v)))
-        self.seg_log.pack(side="left", padx=(10, 0))
-        note("操作记录留多少行，多了自动丢最旧的")
 
         r = row("退出时")
         self.seg_exit = Segmented(r, [("留着 DSH 跑", "off"), ("停掉 DSH", "on")],
@@ -1410,7 +1802,51 @@ class App:
                                  "on" if self.cfg.get("check_update", True) else "off",
                                  lambda v: self.on_setting("check_update", v == "on"))
         self.seg_chk.pack(side="left", padx=(10, 0))
-        note("启动器一打开就去仓库问有没有新版本")
+        note("启动器一打开就去仓库问有没有新版本（走 git，不用梯子）")
+
+        r = row("日志行数")
+        self.seg_log = Segmented(r, [("200 行", 200), ("500 行", 500), ("2000 行", 2000)],
+                                 int(self.cfg.get("keep_log", 500)),
+                                 lambda v: self.on_setting("keep_log", int(v)))
+        self.seg_log.pack(side="left", padx=(10, 0))
+        note("操作记录留多少行，多了自动丢最旧的")
+
+        r = row("日志跟随")
+        self.seg_follow = Segmented(r, [("关", "off"), ("自动滚到底", "on")],
+                                    "on" if self.cfg.get("log_autoscroll", True) else "off",
+                                    lambda v: self.on_setting("log_autoscroll", v == "on"))
+        self.seg_follow.pack(side="left", padx=(10, 0))
+        note("新日志进来时自动滚到最下面")
+
+        r = row("开机自启")
+        st, val = C.autostart_state()
+        self.seg_boot = Segmented(r, [("关", "off"), ("开机就跑", "on")],
+                                  "on" if st else "off",
+                                  lambda v: self.on_setting("autostart", v == "on"))
+        self.seg_boot.pack(side="left", padx=(10, 0))
+        self.boot_text = tk.Label(r, text=("已登记" if st else "没登记"), bg=CARD,
+                                  fg=DIM, font=(FONT, 10))
+        self.boot_text.pack(side="left", padx=(12, 0))
+        note("写进 Windows 的开机启动项（HKCU\\...\\Run），随时可以关掉")
+
+        r = row("安全模式")
+        self.seg_safe = Segmented(r, [("普通", "off"), ("安全模式", "on")],
+                                  "on" if self.cfg.get("safe_mode") else "off",
+                                  lambda v: self.on_setting("safe_mode", v == "on"))
+        self.seg_safe.pack(side="left", padx=(10, 0))
+        Btn(r, "看现状", self.on_safe_report, "plain", padx=12,
+            pady=6).pack(side="left", padx=(14, 0))
+        note("开 = 每次启动 DSH 之前连问三次「真的要动吗」，并跳过自动更新 / 自动修复")
+
+        # ------------------------------------------------ 工具
+        row, note = group("工具与诊断")
+
+        r = row("错误分析")
+        Btn(r, "分析一下", self.on_error_analysis, "main", padx=14,
+            pady=6).pack(side="left", padx=(10, 0))
+        Btn(r, "清空记录", self.on_clear_crash, "plain", padx=12,
+            pady=6).pack(side="left", padx=(8, 0))
+        note("翻 crash.log 和最近的失败日志，对号入座给出原因和处理办法")
 
         r = row("配置文件")
         Btn(r, "打开配置目录", self.on_open_cfg, "plain", padx=14,
@@ -1444,11 +1880,205 @@ class App:
                 self.root.attributes("-topmost", bool(value))
             except tk.TclError:
                 pass
+        elif key == "alpha":
+            self.apply_alpha(value)
+        elif key == "anim":
+            set_anim(value)
+        elif key == "theme":
+            self.toast("配色已记下，重启启动器后整体生效", "ok", 4200)
+        elif key == "autostart":
+            good, msg = C.set_autostart(bool(value))
+            if not good:
+                self.cfg["autostart"] = False
+                self._set_seg("seg_boot", "off")
+                self._set_label("boot_text", "改不了")
+                C.save_settings(self.cfg)
+                self.toast(msg, "bad", 5000)
+                self.say("开机自启设置失败：%s" % msg)
+                return
+            self._set_label("boot_text", "已登记" if value else "没登记")
+            self.toast(msg, "ok")
+        elif key == "download_dir":
+            C.apply_settings_to_paths(self.cfg)
+            self.refresh_dl_text()
+        elif key == "registry":
+            C.apply_settings_to_paths(self.cfg)
+        elif key == "safe_mode":
+            self.toast("安全模式已开：启动 DSH 前会连问三遍" if value
+                       else "已关掉安全模式", "ok" if value else "info")
         good, err = C.save_settings(self.cfg)
         self.say(("设置 %s = %s" % (key, value)) if good
                  else ("设置保存失败：%s" % err))
-        self.toast("设置已保存" if good else ("保存失败：%s" % err),
-                   "ok" if good else "bad")
+        if key not in ("theme", "safe_mode", "autostart"):
+            self.toast("设置已保存" if good else ("保存失败：%s" % err),
+                       "ok" if good else "bad")
+
+    def _set_label(self, attr, text):
+        w = getattr(self, attr, None)
+        try:
+            if w is not None and w.winfo_exists():
+                w.configure(text=text)
+        except tk.TclError:
+            pass
+
+    def _set_seg(self, attr, value):
+        s = getattr(self, attr, None)
+        try:
+            if s is not None:
+                s.set(value)
+        except Exception:
+            pass
+
+    def apply_alpha(self, val):
+        try:
+            top = max(0.55, min(1.0, float(val) / 100.0))
+            self.root.attributes("-alpha", top)
+        except tk.TclError:
+            pass
+
+    # ------------------------------------------------------------ 面板 / 确认框
+    def show_panel(self, title, subtitle, lines, ok=True):
+        """项目内报告浮层（不用系统弹窗）。"""
+        try:
+            for w in self.root.winfo_children():
+                if isinstance(w, Panel):
+                    w.close()
+            Panel(self.root, title, subtitle, lines, ok)
+        except Exception as e:
+            self.toast("弹窗失败：%s" % e, "bad")
+
+    def confirm_steps(self, steps, on_ok):
+        """依次弹确认框，全点「继续」才执行 on_ok。"""
+        seq = list(steps)
+
+        def step(i):
+            if i >= len(seq):
+                on_ok()
+                return
+            title, text = seq[i]
+            Ask(self.root, title, text, on_ok=lambda: step(i + 1),
+                on_cancel=lambda: self.toast("已取消，什么都没动", "info"),
+                ok_text=("继续" if i < len(seq) - 1 else "就这样做"),
+                cancel_text="取消")
+
+        step(0)
+
+    # ------------------------------------------------------------ 设置页按钮
+    def on_relaunch(self):
+        """重启启动器本身。"""
+        try:
+            if getattr(sys, "frozen", False):
+                args = [sys.executable]
+            else:
+                pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+                py = pyw if os.path.isfile(pyw) else sys.executable
+                args = [py, os.path.abspath(sys.argv[0])]
+            subprocess.Popen(args, close_fds=True)
+        except Exception as e:
+            self.toast("重启失败：%s" % e, "bad")
+            return
+        self.say("正在重启启动器…")
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+
+    def refresh_dl_text(self):
+        d = self.cfg.get("download_dir") or C.DEFAULT_VERSIONS_DIR
+        self._set_label("dl_text", C.clean_display(d))
+
+    def on_pick_dir(self):
+        try:
+            from tkinter import filedialog
+            d = filedialog.askdirectory(
+                title="DSH 版本装到哪",
+                initialdir=self.cfg.get("download_dir") or C.DEFAULT_VERSIONS_DIR,
+                parent=self.root)
+        except Exception as e:
+            self.toast("打不开目录选择：%s" % e, "bad")
+            return
+        if not d:
+            return
+        self.on_setting("download_dir", d)
+        self._set_label("dl_text", C.clean_display(d))
+        self.toast("下载位置改好了", "ok")
+
+    def on_dl_default(self):
+        self.on_setting("download_dir", "")
+        self._set_label("dl_text", C.clean_display(C.DEFAULT_VERSIONS_DIR))
+        self.toast("已改回默认位置", "ok")
+
+    def on_open_dl_dir(self):
+        d = self.cfg.get("download_dir") or C.DEFAULT_VERSIONS_DIR
+        try:
+            if not os.path.isdir(d):
+                os.makedirs(d)
+            os.startfile(d)
+            self.say("已打开 " + d)
+        except Exception as e:
+            self.toast("打开失败：%s" % e, "bad")
+
+    def on_check_node(self):
+        if "cknode" in self.busy:
+            return
+
+        def job():
+            self.say("检测 Node.js / npm…")
+            ok, rows = C.check_node()
+            self.q.put({"kind": "report", "rows": rows, "err": "",
+                        "title": "Node.js 检测",
+                        "sub": "一切就绪" if ok else "有项目没通过"})
+        self.spawn(job, "cknode")
+
+    def on_error_analysis(self):
+        if "analyse" in self.busy:
+            return
+
+        def job():
+            self.say("翻错误记录…")
+            hits = C.analyze_errors()
+            log = C.read_crash_log()
+            if not hits:
+                lines = ["没找到已知错误。", ""]
+                if log.strip():
+                    lines.append("crash.log 里还有 %d 个字，但都不在已知错误表里。" % len(log))
+                    lines.append("把下面这段发给作者看看：")
+                    lines.append("")
+                    lines.extend(log.strip().splitlines()[-12:])
+                else:
+                    lines.append("crash.log 是空的 —— 启动器最近没崩过。")
+                    lines.append("如果 DSH 起不来，可以先去「服务」页点「修复DSH」。")
+                self.q.put({"kind": "report", "rows": [], "err": "",
+                            "title": "错误分析", "sub": "没发现问题",
+                            "plain": lines})
+                return
+            rows = []
+            for _needle, why, fix, raw in hits:
+                desc = fix + ("　← " + raw if raw else "")
+                rows.append((why, desc, False))
+            self.q.put({"kind": "report", "rows": rows, "err": "",
+                        "title": "错误分析", "sub": "%d 条" % len(hits)})
+        self.spawn(job, "analyse")
+
+    def on_clear_crash(self):
+        good, err = C.clear_crash_log()
+        if good:
+            self.say("已清空 crash.log")
+            self.toast("崩溃记录已清空", "ok")
+        else:
+            self.say("清空失败：%s" % err)
+            self.toast("清不掉：%s" % err, "bad")
+
+    def on_safe_report(self):
+        if "saferep" in self.busy:
+            return
+
+        def job():
+            self.say("看看安全模式会碰到哪些地方…")
+            rows = [(name, desc, True) for name, desc in C.safe_mode_report()]
+            self.q.put({"kind": "report", "rows": rows, "err": "",
+                        "title": "安全模式现状", "sub": "只看不改"})
+        self.spawn(job, "saferep")
 
     def on_close(self):
         if self.cfg.get("stop_on_exit") and (self.last_status or {}).get("running"):
@@ -1471,6 +2101,10 @@ class App:
     def on_reset_settings(self):
         self.cfg = dict(C.DEFAULT_SETTINGS)
         C.save_settings(self.cfg)
+        C.apply_settings_to_paths(self.cfg)
+        set_anim(self.cfg.get("anim", "normal"))
+        self.apply_alpha(self.cfg.get("alpha", 100))
+        self.refresh_dl_text()
         try:
             self.root.attributes("-topmost", bool(self.cfg.get("topmost", True)))
         except tk.TclError:
@@ -1482,11 +2116,20 @@ class App:
                                  (getattr(self, "seg_chk", None), "check_update", True),
                                  (getattr(self, "seg_reg", None), "registry", "npmmirror"),
                                  (getattr(self, "seg_open", None), "open_mode", "browser"),
-                                 (getattr(self, "seg_compat", None), "compat", False)):
+                                 (getattr(self, "seg_compat", None), "compat", False),
+                                 (getattr(self, "seg_theme", None), "theme", "light"),
+                                 (getattr(self, "seg_anim", None), "anim", "normal"),
+                                 (getattr(self, "seg_alpha", None), "alpha", 100),
+                                 (getattr(self, "seg_askdl", None), "ask_dl_dir", False),
+                                 (getattr(self, "seg_cknode", None), "check_node", True),
+                                 (getattr(self, "seg_follow", None), "log_autoscroll", True),
+                                 (getattr(self, "seg_boot", None), "autostart", False),
+                                 (getattr(self, "seg_safe", None), "safe_mode", False)):
             if seg is None:
                 continue
             v = self.cfg.get(key, on_val)
             seg.set("on" if (isinstance(v, bool) and v) else ("off" if isinstance(v, bool) else v))
+        self._set_label("boot_text", "已登记" if C.autostart_state()[0] else "没登记")
         self.toast("设置已恢复默认", "ok")
         self.say("设置已恢复默认")
 
@@ -1503,8 +2146,9 @@ class App:
         self.spawn(self._do_check_update, "update")
 
     def _do_check_update(self):
-        self.q.put({"kind": "status", "text": "检查启动器更新…"})
+        self.prog("检查启动器更新…")
         tag, sha, err = C.remote_tags()
+        self.prog(None, None)
         if err:
             self.q.put({"kind": "update", "text": "查不到：%s" % err, "ok": False})
             return
@@ -1554,11 +2198,11 @@ class App:
             self.tree.column(col, width=wdt, anchor=anc)
         for tag, col in (("ok", OK), ("warn", WARN), ("bad", BAD)):
             self.tree.tag_configure(tag, foreground=col)
-        self.tree.tag_configure("odd", background="#fafbfd")
+        self.tree.tag_configure("odd", background=SOFT_ODD)
         self.tree.pack(fill="x", pady=(14, 12))
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
         self.detail = tk.Text(body, height=8, wrap="word", font=(FONT, 10), relief="flat",
-                              bg="#fafbfc", fg=INK, padx=14, pady=11,
+                              bg=SOFT, fg=INK, padx=14, pady=11,
                               highlightthickness=1, highlightbackground=LINE, bd=0)
         self.detail.pack(fill="x")
         self.detail.configure(state="disabled")
@@ -1566,6 +2210,7 @@ class App:
         return page
 
     def on_nav(self, key):
+        self.cur_page = key
         for k, it in self.nav_items.items():
             it.set_on(k == key)
         page = self.pages[key]
@@ -1573,43 +2218,48 @@ class App:
         self._slide_in(page)
         self._ind_to(key)
 
-    def _slide_in(self, page, x=34):
-        """新页从右侧轻轻滑进来（旧页在下面被逐步盖住）。"""
+    def _slide_in(self, page, x=30):
+        """新页从右侧滑进来：位移按 ease-out 收敛（整段时长受「动画」设置控制）。"""
+        if not anim_on():
+            page.place_configure(x=0)
+            return
+        span = dur(230)
+        tick = 12
 
-        def step(v):
+        def step(elapsed):
             if not page.winfo_exists():
                 return
-            v = 0.0 if v <= 1 else v * 0.68
-            page.place_configure(x=v)
-            if v > 0:
-                self.root.after(13, lambda: step(v))
+            k = 1.0 if span <= 0 else min(1.0, elapsed / float(span))
+            page.place_configure(x=int(round(x * (1 - ease(k)))))
+            if k < 1.0:
+                self.root.after(tick, lambda: step(elapsed + tick))
 
-        step(x)
+        step(0)
 
     def _ind_to(self, key, instant=False):
-        """左侧那条蓝色指示条滑到当前项。"""
+        """左侧那条蓝色指示条滑到当前项（同样是 ease-out）。"""
         it = self.nav_items.get(key)
         if it is None:
             return
         y = it.winfo_y()
         if y <= 0:
             y = 14 + list(self.nav_items).index(key) * 54
-        if instant:
-            self.nav_ind.place_configure(y=y)
+        y0 = float(self.nav_ind.winfo_y())
+        if instant or not anim_on():
+            self.nav_ind.place_configure(y=int(y))
             return
+        span = dur(200)
+        tick = 12
 
-        def slide(cur, target):
+        def slide(elapsed):
             if not self.nav_ind.winfo_exists():
                 return
-            d = target - cur
-            if abs(d) <= 1.5:
-                self.nav_ind.place_configure(y=int(target))
-                return
-            cur = cur + d * 0.42
-            self.nav_ind.place_configure(y=int(cur))
-            self.root.after(12, lambda: slide(cur, target))
+            k = 1.0 if span <= 0 else min(1.0, elapsed / float(span))
+            self.nav_ind.place_configure(y=int(round(y0 + (y - y0) * ease(k))))
+            if k < 1.0:
+                self.root.after(tick, lambda: slide(elapsed + tick))
 
-        slide(float(self.nav_ind.winfo_y()), float(y))
+        slide(0)
 
     # ------------------------------------------------------------ 线程/消息
     def say(self, text):
@@ -1634,7 +2284,8 @@ class App:
                     ts = datetime.now().strftime("%H:%M:%S")
                     self.log.configure(state="normal")
                     self.log.insert("end", "%s  %s\n" % (ts, m["text"]))
-                    self.log.see("end")
+                    if self.cfg.get("log_autoscroll", True):
+                        self.log.see("end")
                     keep = int(self.cfg.get("keep_log", 500) or 500)
                     total = int(self.log.index("end-1c").split(".")[0])
                     if total > keep + 80:
@@ -1677,7 +2328,8 @@ class App:
                 elif k == "toast":
                     self.toast(m["text"], m.get("level", "info"))
                 elif k == "report":
-                    self.show_report(m["rows"], m["err"])
+                    self.show_report(m["rows"], m["err"], m.get("title", "修复 DSH"),
+                                     m.get("sub", ""), m.get("plain"))
                 elif k == "cover_text":
                     self.cover_text(m["text"])
                 elif k == "cover_off":
@@ -1841,7 +2493,7 @@ class App:
 
     def show_peak(self, p):
         if not p["has_config"]:
-            self.peak_badge.set("无峰谷配置", fill="#333333", fg="#9a9a9a")
+            self.peak_badge.set("无峰谷配置", fill=BADGE_BG, fg=FAINT)
             self.peak_next.configure(text="")
             return
         text = "%s 当前 %s" % (p["label"], p["note"])
@@ -1879,7 +2531,7 @@ class App:
 
     def show_versions(self):
         self.ver_box.configure(values=self.combo_values())
-        want, why = C.pick_version(self.cfg, self.local, self.remote)
+        want, why = C.pick_version(self.vcfg, self.local, self.remote)
         running = (self.last_status or {}).get("version") if self.last_status.get("running") else None
         parts = []
         if self.remote:
@@ -1906,7 +2558,7 @@ class App:
         self.ver_hint.configure(text="\n".join(parts))
         cur = self._ver_of(self.ver_box.get())
         target = want
-        if self.seg_pick.get() == "manual" and self.cfg.get("selected"):
+        if self.seg_pick.get() == "manual" and self.vcfg.get("selected"):
             target = self.cfg["selected"]
         if target and cur != target:
             for item in self.ver_box.cget("values"):
@@ -1968,18 +2620,18 @@ class App:
 
     # ------------------------------------------------------------ 交互
     def on_mode(self, _val=None):
-        self.cfg["pick_mode"] = self.seg_pick.get()
-        self.cfg["update_mode"] = self.seg_upd.get()
-        self.cfg["channel"] = self.seg_chan.get()
-        C.save_config(self.cfg)
+        self.vcfg["pick_mode"] = self.seg_pick.get()
+        self.vcfg["update_mode"] = self.seg_upd.get()
+        self.vcfg["channel"] = self.seg_chan.get()
+        C.save_config(self.vcfg)
         self.show_versions()
 
     def on_pick(self, _evt):
         v = self._ver_of(self.ver_box.get())
         if v:
-            self.cfg["selected"] = v
+            self.vcfg["selected"] = v
             if self.seg_pick.get() == "manual":
-                C.save_config(self.cfg)
+                C.save_config(self.vcfg)
         self.show_versions()
 
     def on_clear_log(self):
@@ -2048,13 +2700,46 @@ class App:
     def on_plugin_check(self):
         self.plugin_check_job()
 
+    def pre_install_checks(self):
+        """装之前的两道关：先看 Node.js，再（可选）问一次下载位置。"""
+        if self.cfg.get("check_node", True):
+            self.say("先看看 Node.js 在不在…")
+            self.root.update_idletasks()
+            ok, rows = C.check_node()
+            if not ok:
+                self.say("❌ 没找到 Node.js / npm —— 装不了 DSH。")
+                self.show_report(rows, "", "Node.js 检测", "缺了关键东西")
+                return False
+        if self.cfg.get("ask_dl_dir"):
+            try:
+                from tkinter import filedialog
+                d = filedialog.askdirectory(
+                    title="这次装到哪个文件夹？",
+                    initialdir=self.cfg.get("download_dir") or C.DEFAULT_VERSIONS_DIR,
+                    parent=self.root)
+            except Exception as e:
+                self.toast("打不开目录选择：%s" % e, "bad")
+                return False
+            if not d:
+                self.toast("已取消，没有开始下载", "info")
+                self.say("已取消下载")
+                return False
+            self.cfg["download_dir"] = d
+            C.apply_settings_to_paths(self.cfg)
+            C.save_settings(self.cfg)
+            self.refresh_dl_text()
+            self.say("这次装到 " + C.clean_display(d))
+        return True
+
     def on_install(self):
         v = self._ver_of(self.ver_box.get())
         if not v:
             self.say("❌请选择版本")
             return
-        self.cfg["selected"] = v
-        C.save_config(self.cfg)
+        if not self.pre_install_checks():
+            return
+        self.vcfg["selected"] = v
+        C.save_config(self.vcfg)
 
         def job():
             self.say("开始安装 %s…" % v)
@@ -2088,7 +2773,7 @@ class App:
         """下载小卡片：贴在中下方，不盖住页面。"""
         self.dl_close(instant=True)
         W, H = 420, 118
-        cv = tk.Frame(self.root, bg=TITLE_BG, highlightbackground="#3a3f47",
+        cv = tk.Frame(self.root, bg=TITLE_BG, highlightbackground=TOP_EDGE,
                       highlightthickness=1)
         y0 = -24
         cv.place(relx=0.5, rely=1.0, anchor="s", y=y0 + H + 30, width=W, height=H)
@@ -2103,7 +2788,7 @@ class App:
         self.dl_pct = tk.Label(top, text="0%", bg=TITLE_BG, fg="#ffffff",
                                font=(FONT, 13, "bold"))
         self.dl_pct.pack(side="right")
-        self.dl_bar = Bar(box, bg=TITLE_BG, height=6, color=BLUE, track="#3a3f47")
+        self.dl_bar = Bar(box, bg=TITLE_BG, height=6, color=BLUE, track=TOP_EDGE)
         self.dl_bar.pack(fill="x", pady=(9, 0))
         self.dl_bar.set_fraction(0.0)
         self.dl_info = tk.Label(box, text="正在连接…", bg=TITLE_BG, fg="#9aa3ad",
@@ -2120,7 +2805,7 @@ class App:
             k = 1.0 - (1.0 - k) ** 3
             cv.place_configure(y=int(y0 + H + 30 - (H + 30) * k))
             if i < steps:
-                self.root.after(14, lambda: slide(i + 1, steps))
+                self.root.after(dur(14), lambda: slide(i + 1, steps))
 
         slide()
 
@@ -2159,7 +2844,7 @@ class App:
             except Exception:
                 return
             if i < steps:
-                self.root.after(14, lambda: out(i + 1, steps))
+                self.root.after(dur(14), lambda: out(i + 1, steps))
             else:
                 try:
                     cv.destroy()
@@ -2213,7 +2898,7 @@ class App:
                  font=(FONT, 17, "bold")).pack(pady=(20, 8))
         lab = tk.Label(box, text="正在准备…", bg=TITLE_BG, fg="#9aa3ad", font=(FONT, 10))
         lab.pack()
-        bar = Bar(box, bg=TITLE_BG, height=5, color=BLUE, track="#3a3f47")
+        bar = Bar(box, bg=TITLE_BG, height=5, color=BLUE, track=TOP_EDGE)
         bar.configure(width=300)
         bar.pack(pady=(18, 0))
         cv.lift()
@@ -2303,13 +2988,38 @@ class App:
         self.do_start()
 
     def do_start(self, kill_first=False):
+        if self.cfg.get("safe_mode") and not self._safe_ok:
+            self.confirm_steps([
+                ("安全模式 · 第 1 关",
+                 "这次不会自动下载 / 更新 DSH 版本 —— 只用你本地已经装好的那个。"),
+                ("安全模式 · 第 2 关",
+                 "不会改动插件清单（profile/package.json），也不会自动修复任何东西。"),
+                ("安全模式 · 第 3 关",
+                 "起不来就去「设置 → 错误分析」看原因。现在启动？"),
+            ], lambda: self._start_bypass(kill_first))
+            return
+        self._do_start(kill_first)
+
+    def _start_bypass(self, kill_first):
+        """三层确认都过了 —— 只放行这一次，不改设置。"""
+        self._safe_ok = True
+        try:
+            self._do_start(kill_first)
+        finally:
+            self._safe_ok = False
+
+    def _do_start(self, kill_first=False):
         self.launch_cover("正在启动 DSH")
 
         def job():
             try:
-                want, why = C.pick_version(self.cfg, self.local, self.remote)
+                want, why = C.pick_version(self.vcfg, self.local, self.remote)
                 if not want:
                     self.say("挑不出可用版本：" + (why or "未知原因"))
+                    return
+                if self.cfg.get("safe_mode") and want not in self.local:
+                    self.say("安全模式：%s 本地还没有。先关掉安全模式，或在「版本与更新」装好它。"
+                             % want)
                     return
                 pids = C.listening_pids()
                 if pids and not kill_first:
@@ -2356,20 +3066,27 @@ class App:
             self.q.put({"kind": "report", "rows": [],
                         "err": "%s: %s" % (type(e).__name__, e)})
 
-    def show_report(self, rows, err):
+    def show_report(self, rows, err, title="修复 DSH", sub="", plain=None):
         if err:
-            self.say("❌修复失败：%s" % err)
-            self.toast("修复失败：" + err, "bad")
-            messagebox.showerror("修复 DSH", "修复失败：\n\n%s" % err, parent=self.root)
+            self.say("❌%s失败：%s" % (title, err))
+            self.toast("%s失败：%s" % (title, err), "bad")
+            self.show_panel(title + " · 出问题了", sub, [str(err)], ok=False)
+            return
+        if plain:
+            self.say("%s：%s" % (title, sub or ""))
+            self.toast("%s · %s" % (title, sub) if sub else title, "warn")
+            self.show_panel(title + (" · " + sub if sub else ""), "", plain, ok=False)
             return
         lines = []
         for name, desc, good in rows:
             lines.append("%s  %s：%s" % ("✅" if good else "⚠", name, desc))
         bad = [r for r in rows if not r[2]]
         head = "全部正常" if not bad else "%d 项要注意" % len(bad)
-        self.say("修复结果：%s" % head)
-        self.toast("修复完成：" + head, "ok" if not bad else "warn")
-        messagebox.showinfo("修复 DSH · %s" % head, "\n".join(lines), parent=self.root)
+        self.say("%s结果：%s" % (title, head))
+        self.toast("%s：%s" % (title, head), "ok" if not bad else "warn")
+        if title.startswith("Node.js"):
+            self._set_label("node_text", "正常" if not bad else "有问题")
+        self.show_panel(title + " · " + head, sub, lines, ok=not bad)
 
     def on_restart(self):
         self.launch_cover("正在重启 DSH")
@@ -2378,7 +3095,7 @@ class App:
             try:
                 _, msg = C.stop_server()
                 self.say(msg)
-                want, why = C.pick_version(self.cfg, self.local, self.remote)
+                want, why = C.pick_version(self.vcfg, self.local, self.remote)
                 if not want:
                     self.say("挑不出可用版本：" + (why or "未知原因"))
                     return
