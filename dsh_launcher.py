@@ -15,6 +15,7 @@ import math
 import os
 import queue
 import random
+import re
 import subprocess
 import sys
 import threading
@@ -95,6 +96,39 @@ PALETTE = {
 
 THEME_MODE = _theme_mode()
 _T = PALETTE[THEME_MODE]
+
+# 强调色：把主题蓝换掉，整份 UI 的蓝一起换（重启生效）。
+ACCENTS = [("蓝", "blue"), ("青", "cyan"), ("紫", "violet"), ("橙", "orange")]
+ACCENT_HEX = {
+    "light": {"blue": ("#1370b1", "#0e5b90", "#e9f4fc"),
+              "cyan": ("#0d8ba6", "#0a6d83", "#e2f4f7"),
+              "violet": ("#6b4fd8", "#563fae", "#efeafd"),
+              "orange": ("#c96a15", "#a3540f", "#fdf0e2")},
+    "dark": {"blue": ("#4a9ede", "#3a86c0", "#1e3a52"),
+             "cyan": ("#4ec2d8", "#3ba0b4", "#153a42"),
+             "violet": ("#9b86ef", "#7d68d6", "#2a2547"),
+             "orange": ("#e0a04a", "#c08434", "#3d2f18")},
+}
+
+
+def _pref(key, default):
+    try:
+        return C.load_settings().get(key, default)
+    except Exception:
+        return default
+
+
+ACCENT_MODE = str(_pref("accent", "blue"))
+if ACCENT_MODE not in ACCENT_HEX[THEME_MODE]:
+    ACCENT_MODE = "blue"
+for _k, _v in zip(("BLUE", "BLUE_D", "BLUE_L"), ACCENT_HEX[THEME_MODE][ACCENT_MODE]):
+    _T[_k] = _v
+
+# 界面密度：紧凑就把卡片内边距和页间距收一收（重启生效）。
+DENSITY = "compact" if str(_pref("density", "normal")) == "compact" else "normal"
+CARD_PAD = 14 if DENSITY == "compact" else 22
+PAGE_PAD = 12 if DENSITY == "compact" else 20
+PAGE_GAP = 10 if DENSITY == "compact" else 18
 
 BLUE = _T["BLUE"]            # 主题色
 BLUE_D = _T["BLUE_D"]        # 按下
@@ -266,7 +300,7 @@ class Scroll(tk.Frame):
 class Card(tk.Frame):
     """圆角白卡片（带一点投影）。内容放进 .body。"""
 
-    def __init__(self, parent, title="", accent=BLUE, pad=22, radius=14):
+    def __init__(self, parent, title="", accent=BLUE, pad=CARD_PAD, radius=14):
         super().__init__(parent, bg=PAGE_BG)
         self._radius = radius
         self.canvas = tk.Canvas(self, bg=PAGE_BG, highlightthickness=0, bd=0, height=24)
@@ -472,6 +506,11 @@ class Btn(tk.Canvas):
         self._text = text
         self._enabled = True
         self._hover = False
+        self._busy = False
+        self._busy_text = ""
+        self._busy_kind = None
+        self._busy_t = 0.0
+        self._busy_i = 0
         self._cmd = cmd
         w = width or (self._font.measure(text) + padx * 2)
         h = self._font.metrics("linespace") + pady * 2
@@ -486,9 +525,11 @@ class Btn(tk.Canvas):
 
     def _draw(self, t=None, press=False):
         fill, fg, outline, hover = self.KINDS[self._kind]
-        if not self._enabled:
+        if self._busy and self._busy_kind:
+            fill, fg, outline, hover = self.KINDS[self._busy_kind]
+        if not self._enabled and not self._busy:
             fill, fg, outline = OFF_BG, OFF_FG, OFF_LINE
-        elif self._kind != "seg_on":
+        elif not self._busy and self._kind != "seg_on":
             if t is None:
                 t = 1.0 if self._hover else 0.0
             if t > 0:
@@ -502,8 +543,53 @@ class Btn(tk.Canvas):
         if fill != self._bg or d:
             round_rect(self, d, d, self._cw - d, self._ch - d, self._radius,
                        fill=fill, outline=outline)
-        self.create_text(self._cw / 2.0, self._ch / 2.0 + d, text=self._text, fill=fg,
+        txt = self._busy_text if self._busy else self._text
+        self.create_text(self._cw / 2.0, self._ch / 2.0 + d, text=txt, fill=fg,
                          font=self._font_spec)
+        if self._busy:
+            seg = max(26.0, self._cw * 0.36)
+            span = max(1.0, self._cw - seg - 10)
+            x0 = 5 + span * self._busy_t
+            self.create_rectangle(x0, self._ch - 4.0, x0 + seg, self._ch - 2.0,
+                                  fill=mix(fg, fill, 0.3), outline="")
+
+    def set_busy(self, on, text=None, kind=None):
+        """忙碌态：保持亮色但点不动，文字可换，底下来回扫一条细进度。"""
+        on = bool(on)
+        if on == self._busy:
+            if on and text and text != self._busy_text:
+                self._busy_text = text
+                self._draw()
+            return
+        if on:
+            self._busy = True
+            self._busy_text = text or self._text
+            self._busy_kind = kind or self._kind
+            self._busy_i = 0
+            self._busy_t = 0.0
+            self._enabled = False
+            self.configure(cursor="arrow")
+            self._draw()
+            self._busy_tick()
+        else:
+            self._busy = False
+            self._busy_text = ""
+            self._busy_kind = None
+            self._enabled = True
+            self.configure(cursor="hand2")
+            self._draw()
+
+    def _busy_tick(self):
+        if not self._busy:
+            return
+        self._busy_i = (self._busy_i + 1) % 40
+        p = self._busy_i / 39.0
+        self._busy_t = p * 2.0 if p < 0.5 else (1.0 - p) * 2.0
+        try:
+            self._draw()
+        except tk.TclError:
+            return
+        self.after(dur(30), self._busy_tick)
 
     def _recalc(self):
         self._cw = self._font.measure(self._text) + self._padx * 2
@@ -990,6 +1076,293 @@ class Segmented(tk.Canvas):
         self._slide(self._x_of(self._index()), instant=True)
 
 
+class Sweep(tk.Canvas):
+    """一条来回扫的细线：待机时是普通分隔线，忙起来变成会跑的进度线。"""
+
+    def __init__(self, parent, width=600, height=3, bg=CARD, color=BLUE):
+        super().__init__(parent, width=width, height=height, bg=bg,
+                         highlightthickness=0, bd=0)
+        self._cw, self._h, self._c = width, height, color
+        self._t, self._on, self._i = 0.0, False, 0
+        self.bind("<Configure>", self._resize)
+        self._draw()
+
+    def _resize(self, evt):
+        self._cw = evt.width
+        self._draw()
+
+    def start(self, color=None):
+        if color:
+            self._c = color
+        if self._on:
+            return
+        self._on, self._i = True, 0
+        self._tick()
+
+    def stop(self):
+        self._on = False
+        self._draw()
+
+    def _tick(self):
+        if not self._on:
+            return
+        self._i = (self._i + 1) % 40
+        p = self._i / 39.0
+        self._t = p * 2.0 if p < 0.5 else (1.0 - p) * 2.0
+        try:
+            self._draw()
+        except tk.TclError:
+            return
+        self.after(dur(26), self._tick)
+
+    def _draw(self):
+        self.delete("all")
+        w, h = self._cw, self._h
+        self.create_rectangle(0, 0, w, h, fill=LINE, outline=LINE)
+        if self._on:
+            seg = max(70.0, w * 0.26)
+            x0 = (w - seg) * self._t
+            self.create_rectangle(x0, 0, x0 + seg, h, fill=self._c, outline=self._c)
+
+
+class Select(tk.Canvas):
+    """自绘下拉选择器 —— 替掉 ttk.Combobox，原生控件会破坏整体风格。
+
+    items 元素是 (value, note, kind)：
+      value 真正取值；note 是右侧小字；kind 决定 note 颜色
+      （run=正在跑 / have=已装 / net=远端）。
+    """
+
+    H = 36
+    ROW = 32
+    MAXROWS = 9
+    MAGIC = "#010203"
+
+    def __init__(self, parent, items=None, value=None, cmd=None, bg=CARD,
+                 width=470, radius=9, placeholder="还没挑版本"):
+        self._items = list(items or [])
+        self._value = value
+        self._cmd = cmd
+        self._bg = bg
+        self._cw = width
+        self._radius = radius
+        self._ph = placeholder
+        self._hover = False
+        self._pop = None
+        self._pop_cv = None
+        self._off = 0
+        self._hi = -1
+        self._bold = tkfont.Font(font=(FONT, 11, "bold"))
+        self._note = tkfont.Font(font=(FONT, 9))
+        super().__init__(parent, width=width, height=self.H, bg=bg,
+                         highlightthickness=0, bd=0, cursor="hand2")
+        self.bind("<Button-1>", lambda e: self.toggle())
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Destroy>", lambda e: self.close())
+        self._draw()
+
+    # ---------------------------------------------------------------- 主框
+    def _on_enter(self, _e):
+        self._hover = True
+        self._draw()
+
+    def _on_leave(self, _e):
+        self._hover = False
+        self._draw()
+
+    def _open_now(self):
+        return self._pop is not None
+
+    def _show(self):
+        for it in self._items:
+            if it and it[0] == self._value:
+                return (it[0], it[1] if len(it) > 1 else "",
+                        it[2] if len(it) > 2 else "net")
+        return (self._value or ""), "", "net"
+
+    def _note_color(self, it):
+        kind = it[2] if len(it) > 2 else "net"
+        if kind == "run":
+            return OK
+        if kind == "have":
+            return BLUE
+        return FAINT
+
+    def _draw(self):
+        w, h = self._cw, self.H
+        self.delete("all")
+        base = mix(BTN, BTN_HOVER, 1.0 if (self._hover or self._open_now()) else 0.0)
+        round_rect(self, .5, .5, w - .5, h - .5, self._radius, fill=base,
+                   outline=BLUE if self._open_now() else LINE)
+        v, note, kind = self._show()
+        if v:
+            self.create_text(15, h / 2.0, text=v, anchor="w", fill=INK,
+                             font=(FONT, 11, "bold"))
+            if note:
+                self.create_text(15 + self._bold.measure(v) + 13, h / 2.0 + 1,
+                                 text=note, anchor="w",
+                                 fill=self._note_color((v, note, kind)),
+                                 font=(FONT, 9))
+        else:
+            self.create_text(15, h / 2.0, text=self._ph, anchor="w", fill=FAINT,
+                             font=(FONT, 10))
+        cx, cy = w - 19, h / 2.0
+        self.create_polygon(cx - 4, cy - 2.5, cx + 4, cy - 2.5, cx, cy + 2.5,
+                            fill=DIM, outline=DIM)
+
+    # ---------------------------------------------------------------- 弹出
+    def toggle(self):
+        if self._open_now():
+            self.close()
+        else:
+            self.open()
+
+    def open(self):
+        if not self._items or self._pop is not None:
+            return
+        rows = min(len(self._items), self.MAXROWS)
+        h = rows * self.ROW + 4
+        w = self._cw
+        x = self.winfo_rootx()
+        y = self.winfo_rooty() + self.H + 4
+        if y + h > self.winfo_screenheight() - 12:
+            up = self.winfo_rooty() - h - 4
+            if up > 12:
+                y = up
+        self._off, self._hi = 0, -1
+        pop = tk.Toplevel(self)
+        pop.overrideredirect(True)
+        pop.attributes("-topmost", True)
+        try:
+            pop.attributes("-transparentcolor", self.MAGIC)
+        except tk.TclError:
+            pass
+        pop.configure(bg=self.MAGIC)
+        pop.geometry("%dx%d+%d+%d" % (w, h, x, y))
+        cv = tk.Canvas(pop, width=w, height=h, bg=self.MAGIC,
+                       highlightthickness=0, bd=0, cursor="hand2")
+        cv.pack()
+        cv.bind("<Motion>", self._pop_motion)
+        cv.bind("<Button-1>", self._pop_click)
+        cv.bind("<MouseWheel>", self._pop_wheel)
+        cv.bind("<Escape>", lambda e: self.close())
+        self._pop, self._pop_cv = pop, cv
+        self._draw_pop()
+        pop.update_idletasks()
+        try:
+            pop.grab_set()
+        except tk.TclError:
+            pass
+        pop.bind_all("<Button-1>", self._global_click, add="+")
+        self._draw()
+
+    def _global_click(self, evt):
+        w = evt.widget
+        if w is self or (self._pop_cv is not None and w is self._pop_cv):
+            return
+        self.close()
+
+    def _pop_index(self, y):
+        i = self._off + int((y - 2) // self.ROW)
+        if 0 <= i < len(self._items) and 2 <= y <= 2 + self.MAXROWS * self.ROW:
+            return i
+        return -1
+
+    def _pop_motion(self, evt):
+        i = self._pop_index(evt.y)
+        if i != self._hi:
+            self._hi = i
+            self._draw_pop()
+
+    def _pop_click(self, evt):
+        i = self._pop_index(evt.y)
+        if i >= 0:
+            self._pick(self._items[i][0])
+        else:
+            self.close()
+
+    def _pop_wheel(self, evt):
+        n = len(self._items) - self.MAXROWS
+        if n <= 0:
+            return
+        self._off = max(0, min(n, self._off - (1 if evt.delta < 0 else -1)))
+        self._hi = -1
+        self._draw_pop()
+
+    def _draw_pop(self):
+        cv = self._pop_cv
+        if cv is None:
+            return
+        cv.delete("all")
+        w = self._cw
+        h = cv.winfo_reqheight()
+        round_rect(cv, 1, 1, w - 1, h - 1, self._radius + 2, fill=CARD, outline=LINE)
+        for n in range(self._off, min(len(self._items), self._off + self.MAXROWS)):
+            it = self._items[n]
+            y0 = 2 + (n - self._off) * self.ROW
+            sel = it[0] == self._value
+            if sel or n == self._hi:
+                c = BLUE_L if sel else SOFT
+                round_rect(cv, 8, y0 + 2, w - 8, y0 + self.ROW - 2, 6, fill=c, outline=c)
+            if sel:
+                cv.create_rectangle(3, y0 + 5, 6, y0 + self.ROW - 5, fill=BLUE, outline=BLUE)
+            cv.create_text(20, y0 + self.ROW / 2.0, text=it[0], anchor="w", fill=INK,
+                           font=(FONT, 10, "bold"))
+            note = it[1] if len(it) > 1 else ""
+            if note:
+                cv.create_text(w - 20, y0 + self.ROW / 2.0, text=note, anchor="e",
+                               fill=self._note_color(it), font=(FONT, 9))
+        extra = len(self._items) - self.MAXROWS
+        if extra > 0:
+            bh = max(26.0, (h - 8) * self.MAXROWS / float(len(self._items)))
+            by = 4 + (h - 8 - bh) * (self._off / float(extra))
+            round_rect(cv, w - 7, by, w - 3, by + bh, 2, fill=FAINT, outline=FAINT)
+
+    # ---------------------------------------------------------------- 取值
+    def _pick(self, val):
+        self._value = val
+        self.close()
+        if self._cmd:
+            self._cmd(val)
+
+    def close(self):
+        if self._pop is None:
+            return
+        pop = self._pop
+        self._pop, self._pop_cv = None, None
+        try:
+            pop.unbind_all("<Button-1>")
+        except tk.TclError:
+            pass
+        try:
+            pop.grab_release()
+        except tk.TclError:
+            pass
+        try:
+            pop.destroy()
+        except tk.TclError:
+            pass
+        self._hi = -1
+        self._draw()
+
+    def get(self):
+        return self._value
+
+    def set(self, val):
+        if val != self._value:
+            self._value = val
+            self._draw()
+
+    def set_items(self, items, value=None):
+        self._items = list(items or [])
+        if value is not None:
+            self._value = value
+        if self._pop is not None:
+            self.close()
+        self._draw()
+
+
 class Ring(tk.Canvas):
     """PCL 式彩虹圆环：一圈小弧，颜色随时间流转。"""
 
@@ -1234,6 +1607,7 @@ class App:
         self.q = queue.Queue()
         self.vcfg = C.load_config()
         self.settings = C.load_settings()
+        self.cfg = self.settings
         set_anim(self.settings.get("anim", "normal"))
         self.local = {}
         self.remote = None
@@ -1259,6 +1633,7 @@ class App:
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         h = min(h, sh - 90)
         root.geometry("%dx%d+%d+%d" % (w, h, max(0, (sw - w) // 2), max(0, (sh - h) // 3)))
+        self.restore_win_pos()
 
         try:
             root.attributes("-alpha", 0.0)
@@ -1381,9 +1756,23 @@ class App:
             self.root.attributes("-topmost", bool(self.cfg.get("topmost", True)))
         except tk.TclError:
             pass
-        if self.cfg.get("check_update", True):
+        if self.cfg.get("auto_start_dsh") and not self.st.get("running"):
+            self.root.after(700, self.do_start)
+        if self.cfg.get("check_update", True) and self.update_due():
             self.root.after(1500, self.on_check_update)
         self.root.after(5000, self.tick)
+
+    def update_due(self):
+        """按「查更新」频率决定这次打开要不要去问版本。"""
+        freq = str(self.cfg.get("update_freq", "每次"))
+        if freq in ("", "每次"):
+            return True
+        span = 86400 if freq == "每天" else 7 * 86400
+        try:
+            last = float(self.cfg.get("last_update_check") or 0)
+        except (TypeError, ValueError):
+            last = 0.0
+        return (time.time() - last) >= span
 
     # ------------------------------------------------------------ 主界面骨架
     def build_main(self):
@@ -1489,7 +1878,7 @@ class App:
     def page_service(self):
         page = tk.Frame(self.content, bg=PAGE_BG)
         c = Card(page, "宿主服务")
-        c.pack(fill="x", padx=20, pady=18)
+        c.pack(fill="x", padx=PAGE_PAD, pady=PAGE_GAP)
         body = c.body
         top = tk.Frame(body, bg=CARD)
         top.pack(fill="x")
@@ -1511,7 +1900,8 @@ class App:
         self.status_sub = tk.Label(body, text="", bg=CARD, fg=DIM, font=(FONT, 10),
                                    anchor="w", justify="left")
         self.status_sub.pack(anchor="w", pady=(10, 0))
-        tk.Frame(body, bg=LINE, height=1).pack(fill="x", pady=18)
+        self.sweep = Sweep(body)
+        self.sweep.pack(fill="x", pady=18)
         tk.Label(body, text="明细", bg=CARD, fg=FAINT, font=(FONT, 10, "bold")).pack(anchor="w")
         grid = tk.Frame(body, bg=CARD)
         grid.pack(fill="x", pady=(10, 0))
@@ -1532,7 +1922,7 @@ class App:
     def page_version(self):
         page = tk.Frame(self.content, bg=PAGE_BG)
         c = Card(page, "版本与更新")
-        c.pack(fill="x", padx=20, pady=18)
+        c.pack(fill="x", padx=PAGE_PAD, pady=PAGE_GAP)
         body = c.body
         row1 = tk.Frame(body, bg=CARD)
         row1.pack(fill="x")
@@ -1550,10 +1940,8 @@ class App:
         self.seg_chan.pack(side="left", padx=(10, 0))
         row2 = tk.Frame(body, bg=CARD)
         row2.pack(fill="x", pady=(16, 0))
-        self.ver_box = ttk.Combobox(row2, width=40, font=(FONT, 10), state="readonly",
-                                    style="L.TCombobox")
-        self.ver_box.pack(side="left", ipady=3)
-        self.ver_box.bind("<<ComboboxSelected>>", self.on_pick)
+        self.ver_box = Select(row2, [], None, self.on_pick, width=428)
+        self.ver_box.pack(side="left")
         self.btn_check = Btn(row2, "检测更新", self.on_check, "plain")
         self.btn_install = Btn(row2, "安装 / 更新", self.on_install, "main")
         self.btn_run = Btn(row2, "用这个版本启动", self.on_start, "plain")
@@ -1603,7 +1991,7 @@ class App:
     def page_support(self):
         page = tk.Frame(self.content, bg=PAGE_BG)
         c = Card(page, "支持与 bug 反馈")
-        c.pack(fill="x", padx=20, pady=18)
+        c.pack(fill="x", padx=PAGE_PAD, pady=PAGE_GAP)
         body = c.body
         tk.Label(body, text="想支持我？想反馈 bug？", bg=CARD, fg=INK,
                  font=(FONT, 15, "bold")).pack(anchor="w")
@@ -1670,7 +2058,7 @@ class App:
 
         def group(title):
             c = Card(sc.body, title)
-            c.pack(fill="x", padx=20, pady=(16, 0))
+            c.pack(fill="x", padx=PAGE_PAD, pady=(PAGE_GAP - 2, 0))
             b = c.body
 
             def row(label):
@@ -1728,6 +2116,28 @@ class App:
                                     lambda v: self.on_setting("compat", v == "on"))
         self.seg_compat.pack(side="left", padx=(10, 0))
         note("卡的时候打开：降低动画帧率、关掉镐子动画")
+
+        r = row("强调色")
+        self.seg_accent = Segmented(r, ACCENTS, self.cfg.get("accent", "blue"),
+                                    lambda v: self.on_setting("accent", v))
+        self.seg_accent.pack(side="left", padx=(10, 0))
+        note("整个界面的主题色：按钮、选中项、进度胶囊一起换（重启启动器后生效）")
+
+        r = row("界面密度")
+        self.seg_dens = Segmented(r, [("宽松", "normal"), ("紧凑", "compact")],
+                                  self.cfg.get("density", "normal"),
+                                  lambda v: self.on_setting("density", v))
+        self.seg_dens.pack(side="left", padx=(10, 0))
+        note("紧凑会把卡片内边距和页间距收紧，一屏多看几行（重启启动器后生效）")
+
+        r = row("记住位置")
+        self.seg_pos = Segmented(r, [("每次居中", "off"), ("记住位置", "on")],
+                                 "on" if self.cfg.get("remember_pos", True) else "off",
+                                 lambda v: self.on_setting("remember_pos", v == "on"))
+        self.seg_pos.pack(side="left", padx=(10, 0))
+        Btn(r, "忘掉", self.on_forget_pos, "plain", padx=12,
+            pady=6).pack(side="left", padx=(14, 0))
+        note("关掉启动器时把窗口的位置和大小记进设置，下次原样打开")
 
         # ------------------------------------------------ 下载
         row, note = group("下载与安装")
@@ -1803,6 +2213,36 @@ class App:
                                  lambda v: self.on_setting("check_update", v == "on"))
         self.seg_chk.pack(side="left", padx=(10, 0))
         note("启动器一打开就去仓库问有没有新版本（走 git，不用梯子）")
+
+        r = row("查更新")
+        self.seg_updfreq = Segmented(r, [("每次", "每次"), ("每天", "每天"), ("每周", "每周")],
+                                     self.cfg.get("update_freq", "每次"),
+                                     lambda v: self.on_setting("update_freq", v))
+        self.seg_updfreq.pack(side="left", padx=(10, 0))
+        Btn(r, "立刻查", self.on_check_update, "plain", padx=12,
+            pady=6).pack(side="left", padx=(14, 0))
+        note("上面那个开关打开时，按这个频率去问版本，其余时间跳过")
+
+        r = row("提示通知")
+        self.seg_toast = Segmented(r, [("关", "off"), ("右下角冒一下", "on")],
+                                   "on" if self.cfg.get("toast", True) else "off",
+                                   lambda v: self.on_setting("toast", v == "on"))
+        self.seg_toast.pack(side="left", padx=(10, 0))
+        note("操作成功 / 失败时右下角弹出的那个小胶囊，关掉就只剩底部状态栏")
+
+        r = row("启动完")
+        self.seg_autoopen = Segmented(r, [("什么都不做", "off"), ("自动打开 DSH", "on")],
+                                      "on" if self.cfg.get("open_after_start") else "off",
+                                      lambda v: self.on_setting("open_after_start", v == "on"))
+        self.seg_autoopen.pack(side="left", padx=(10, 0))
+        note("DSH 起来之后，按上面的「打开方式」自动把它打开")
+
+        r = row("打开启动器")
+        self.seg_autodsh = Segmented(r, [("只看看", "off"), ("没跑就拉起 DSH", "on")],
+                                     "on" if self.cfg.get("auto_start_dsh") else "off",
+                                     lambda v: self.on_setting("auto_start_dsh", v == "on"))
+        self.seg_autodsh.pack(side="left", padx=(10, 0))
+        note("开 = 启动器一打开，发现 DSH 没在跑就顺手启动它")
 
         r = row("日志行数")
         self.seg_log = Segmented(r, [("200 行", 200), ("500 行", 500), ("2000 行", 2000)],
@@ -1906,12 +2346,54 @@ class App:
         elif key == "safe_mode":
             self.toast("安全模式已开：启动 DSH 前会连问三遍" if value
                        else "已关掉安全模式", "ok" if value else "info")
+        elif key in ("accent", "density"):
+            self.toast("配色/密度已记下，重启启动器后整体生效", "ok", 4200)
+        elif key == "remember_pos" and not value:
+            self.cfg["win_pos"] = ""
+            self.toast("已忘掉窗口位置，下次打开重新居中", "info")
         good, err = C.save_settings(self.cfg)
         self.say(("设置 %s = %s" % (key, value)) if good
                  else ("设置保存失败：%s" % err))
-        if key not in ("theme", "safe_mode", "autostart"):
+        if key not in ("theme", "safe_mode", "autostart", "accent", "density"):
             self.toast("设置已保存" if good else ("保存失败：%s" % err),
                        "ok" if good else "bad")
+
+    def on_forget_pos(self):
+        self.cfg["win_pos"] = ""
+        self.cfg["remember_pos"] = False
+        self._set_seg("seg_pos", "off")
+        C.save_settings(self.cfg)
+        self.toast("已忘掉窗口位置", "ok")
+
+    def save_win_pos(self):
+        if not self.cfg.get("remember_pos", True):
+            return
+        try:
+            self.root.update_idletasks()
+            geo = "%dx%d+%d+%d" % (self.root.winfo_width(), self.root.winfo_height(),
+                                   self.root.winfo_x(), self.root.winfo_y())
+        except tk.TclError:
+            return
+        if geo != self.cfg.get("win_pos"):
+            self.cfg["win_pos"] = geo
+            C.save_settings(self.cfg)
+
+    def restore_win_pos(self):
+        geo = str(self.cfg.get("win_pos") or "")
+        if not self.cfg.get("remember_pos", True) or not geo:
+            return False
+        if not re.match(r"^\d+x\d+\+-?\d+\+-?\d+$", geo):
+            return False
+        try:
+            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            w, h, x, y = (int(v) for v in re.split(r"[x+]", geo) if v != "")
+        except Exception:
+            return False
+        # 屏幕换过 / 分辨率变过就放弃记忆，别把窗口扔到看不见的地方
+        if x < -40 or y < -20 or x > sw - 120 or y > sh - 80:
+            return False
+        self.root.geometry("%dx%d+%d+%d" % (w, h, x, y))
+        return True
 
     def _set_label(self, attr, text):
         w = getattr(self, attr, None)
@@ -2081,6 +2563,7 @@ class App:
         self.spawn(job, "saferep")
 
     def on_close(self):
+        self.save_win_pos()
         if self.cfg.get("stop_on_exit") and (self.last_status or {}).get("running"):
             try:
                 C.stop_server()
@@ -2142,6 +2625,13 @@ class App:
             self.say("打开失败：" + err)
             self.toast("打开失败：" + err, "bad")
 
+    def open_now(self):
+        """按当前「打开方式」把 DSH 打开（后台线程也能调）。"""
+        mode = self.cfg.get("open_mode", "browser")
+        good, err = C.open_dsh(mode)
+        if not good:
+            self.q.put({"kind": "toast", "text": "打开失败：" + err, "level": "bad"})
+
     def on_check_update(self):
         self.spawn(self._do_check_update, "update")
 
@@ -2149,6 +2639,8 @@ class App:
         self.prog("检查启动器更新…")
         tag, sha, err = C.remote_tags()
         self.prog(None, None)
+        self.cfg["last_update_check"] = time.time()
+        C.save_settings(self.cfg)
         if err:
             self.q.put({"kind": "update", "text": "查不到：%s" % err, "ok": False})
             return
@@ -2163,7 +2655,7 @@ class App:
     def page_plugins(self):
         page = tk.Frame(self.content, bg=PAGE_BG)
         c = Card(page, "插件体检")
-        c.pack(fill="x", padx=20, pady=18)
+        c.pack(fill="x", padx=PAGE_PAD, pady=PAGE_GAP)
         body = c.body
         head = tk.Frame(body, bg=CARD)
         head.pack(fill="x")
@@ -2366,6 +2858,8 @@ class App:
 
     def toast(self, text, kind="info", ms=3200):
         """右下角浮一条提示。"""
+        if not self.cfg.get("toast", True):
+            return
         try:
             Toast(self.root, text, kind, ms)
         except Exception:
@@ -2373,9 +2867,8 @@ class App:
 
     def set_controls(self, name, idle_now):
         m = {"check": self.btn_check, "install": self.btn_install,
-             "start": self.btn_start, "plugins": self.btn_recheck,
-             "run": self.btn_run, "stop": self.btn_stop, "restart": self.btn_restart,
-             "repair": self.btn_repair}
+             "plugins": self.btn_recheck,
+             "run": self.btn_run}
         btn = m.get(name)
         if btn is not None:
             btn.set_enabled(idle_now)
@@ -2384,9 +2877,31 @@ class App:
     def update_service_buttons(self):
         running = bool(self.last_status.get("running"))
         busy = bool(self.busy & {"start", "stop", "restart", "repair"})
-        self.btn_start.set_enabled(running is False and not busy)
-        self.btn_stop.set_enabled(bool(self.busy & {"start", "restart"}) or (running and not busy))
-        self.btn_restart.set_enabled(running and not busy)
+        starting = "start" in self.busy
+        stopping = "stop" in self.busy
+        restarting = "restart" in self.busy
+        repairing = "repair" in self.busy
+        self.btn_start.set_busy(starting, "启动中…")
+        self.btn_stop.set_busy(stopping, "停止中…")
+        self.btn_restart.set_busy(restarting, "重启中…")
+        self.btn_repair.set_busy(repairing, "修复中…")
+        if not starting:
+            self.btn_start.set_enabled(running is False and not busy)
+        if not stopping:
+            self.btn_stop.set_enabled(running and not busy)
+        if not restarting:
+            self.btn_restart.set_enabled(running and not busy)
+        if not repairing:
+            self.btn_repair.set_enabled(not busy)
+        if hasattr(self, "sweep"):
+            if starting or restarting:
+                self.sweep.start(BLUE)
+            elif stopping:
+                self.sweep.start(DANGER_FG)
+            elif repairing:
+                self.sweep.start(WARN)
+            else:
+                self.sweep.stop()
 
     # ------------------------------------------------------------ 后台任务
     def spawn(self, fn, name=None):
@@ -2464,10 +2979,46 @@ class App:
         self.spawn(job, "plugins")
 
     # ------------------------------------------------------------ 显示
+    def _big_text(self, text, color):
+        """状态大字：文字变了才动，颜色从旧色滑到新色。"""
+        if self.status_big.cget("text") == text:
+            try:
+                self.status_big.configure(fg=color)
+            except tk.TclError:
+                pass
+            return
+        old = str(self.status_big.cget("fg")) or DIM
+        try:
+            self.status_big.configure(text=text)
+        except tk.TclError:
+            return
+        self._big_tok = getattr(self, "_big_tok", 0) + 1
+        tok = self._big_tok
+        steps = 9
+
+        def frame(i):
+            if tok != self._big_tok:
+                return
+            try:
+                self.status_big.configure(fg=mix(old, color, i / float(steps)))
+            except tk.TclError:
+                return
+            if i < steps:
+                self.status_big.after(dur(18), lambda: frame(i + 1))
+
+        frame(0)
+
     def show_status(self, st):
         self.last_status = st
+        held = (bool(self.busy & {"start", "restart"}) and not st["running"]) or \
+               ("stop" in self.busy and st["running"])
+        if held:
+            self.detail_rows["port"].configure(text=str(st["port"]))
+            self._last_running = st["running"]
+            self.update_service_buttons()
+            return
         if st["running"]:
-            self.status_big.configure(text="运行中", fg=OK)
+            self._big_text("运行中", OK)
             src = "（%s）" % st["source"] if st["source"] else ""
             self.status_sub.configure(
                 text="PID %s · 端口 %d · 版本 %s%s · 启动于 %s"
@@ -2481,7 +3032,7 @@ class App:
             if self._last_running is not True:
                 self.dot.start_pulse()
         else:
-            self.status_big.configure(text="已停止", fg=BAD)
+            self._big_text("已停止", BAD)
             self.status_sub.configure(text="端口 %d 无进程" % st["port"])
             for key in ("pid", "version", "source", "started", "bin", "cmd"):
                 self.detail_rows[key].configure(text="—")
@@ -2506,10 +3057,12 @@ class App:
         else:
             self.peak_next.configure(text="")
 
-    def combo_values(self):
-        vals = []
+    def version_items(self):
+        """给 Select 用的 (版本号, 右侧小字, 颜色种类) 列表。"""
+        running = (self.last_status or {}).get("version") if (self.last_status or {}).get("running") else None
         remote_versions = (self.remote or {}).get("versions") or []
         tags = (self.remote or {}).get("tags") or {}
+        items = []
         for v in remote_versions[:25]:
             if v == tags.get("latest"):
                 ch = "正式"
@@ -2519,18 +3072,24 @@ class App:
                 ch = "测试"
             else:
                 ch = "正式"
-            vals.append("%s    [%s版%s]" % (v, ch, "已装" if v in self.local else "未装"))
+            if v == running:
+                items.append((v, "%s · 正在跑" % ch, "run"))
+            elif v in self.local:
+                items.append((v, "%s · 已装" % ch, "have"))
+            else:
+                items.append((v, "%s · 未装" % ch, "net"))
         for v in C.sort_versions(self.local.keys()):
             if v not in remote_versions:
-                vals.append("%s    [本地 · %s]" % (v, self.local[v]["source"]))
-        return vals
+                items.append((v, "本地 · %s" % self.local[v]["source"],
+                              "run" if v == running else "have"))
+        return items
 
     @staticmethod
     def _ver_of(item):
         return (item or "").strip().split()[0] if (item or "").strip() else ""
 
     def show_versions(self):
-        self.ver_box.configure(values=self.combo_values())
+        items = self.version_items()
         want, why = C.pick_version(self.vcfg, self.local, self.remote)
         running = (self.last_status or {}).get("version") if self.last_status.get("running") else None
         parts = []
@@ -2556,17 +3115,17 @@ class App:
         if self.local:
             parts.append("本地可用%s" % "、".join(C.sort_versions(self.local.keys())))
         self.ver_hint.configure(text="\n".join(parts))
-        cur = self._ver_of(self.ver_box.get())
         target = want
         if self.seg_pick.get() == "manual" and self.vcfg.get("selected"):
-            target = self.cfg["selected"]
-        if target and cur != target:
-            for item in self.ver_box.cget("values"):
-                if self._ver_of(item) == target:
-                    self.ver_box.set(item)
-                    break
-        elif not cur and self.ver_box.cget("values"):
-            self.ver_box.set(self.ver_box.cget("values")[0])
+            target = self.vcfg["selected"]
+        cur = self.ver_box.get()
+        names = [it[0] for it in items]
+        if target and cur != target and target in names:
+            self.ver_box.set_items(items, target)
+        elif cur not in names:
+            self.ver_box.set_items(items, names[0] if names else None)
+        else:
+            self.ver_box.set_items(items)
 
     def show_plugins(self, summary, rows, err):
         self.rows = rows
@@ -2626,8 +3185,9 @@ class App:
         C.save_config(self.vcfg)
         self.show_versions()
 
-    def on_pick(self, _evt):
-        v = self._ver_of(self.ver_box.get())
+    def on_pick(self, val=None):
+        v = val or self.ver_box.get()
+        v = self._ver_of(v)
         if v:
             self.vcfg["selected"] = v
             if self.seg_pick.get() == "manual":
@@ -3009,6 +3569,8 @@ class App:
             self._safe_ok = False
 
     def _do_start(self, kill_first=False):
+        self._big_text("正在启动…", BLUE)
+        self.sweep.start(BLUE)
         self.launch_cover("正在启动 DSH")
 
         def job():
@@ -3036,6 +3598,9 @@ class App:
                 self.say(msg)
                 self.wait_host()
                 self.q.put({"kind": "started"})
+                if self.cfg.get("open_after_start"):
+                    self.q.put({"kind": "toast", "text": "DSH 起来了，正在打开…"})
+                    self.open_now()
             finally:
                 self.q.put({"kind": "cover_off"})
 
@@ -3051,6 +3616,8 @@ class App:
             _, msg = C.stop_server()
             self.say(msg)
             self.q.put({"kind": "started"})
+        self._big_text("正在停止…", BAD)
+        self.sweep.start(DANGER_FG)
         self.spawn(job, "stop")
 
     # ------------------------------------------------------------ 修复
@@ -3089,6 +3656,8 @@ class App:
         self.show_panel(title + " · " + head, sub, lines, ok=not bad)
 
     def on_restart(self):
+        self._big_text("正在重启…", BLUE)
+        self.sweep.start(BLUE)
         self.launch_cover("正在重启 DSH")
 
         def job():

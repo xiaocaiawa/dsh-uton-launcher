@@ -827,7 +827,7 @@ def scan_plugins(progress=None):
 
 # ---------------------------------------------------------------- 配置
 
-APP_VER = "1.0.1"
+APP_VER = "1.0.2"
 REPO = "xiaocaiawa/dsh-uton-launcher"
 SETTINGS_PATH = os.path.join(os.path.expanduser("~"), "dsh-launcher", "settings.json")
 DEFAULT_SETTINGS = {
@@ -845,6 +845,9 @@ DEFAULT_SETTINGS = {
     "anim": "normal",          # off / fast / normal / slow
     "density": "normal",       # normal / compact
     "alpha": 100,              # 窗口不透明度 85~100
+    "accent": "blue",          # blue / cyan / violet / orange
+    "remember_pos": True,      # 记住窗口位置和大小
+    "toast": True,             # 右下角浮层提示
     # ---- 下载 ----
     "download_dir": "",        # 空 = ~/dsh-launcher/versions
     "ask_dl_dir": False,       # 每次下载前问一次位置
@@ -854,6 +857,11 @@ DEFAULT_SETTINGS = {
     "log_autoscroll": True,
     "safe_mode": False,        # 安全模式启动（三次确认）
     "restore_after_safe": True,
+    "auto_start_dsh": False,   # 打开启动器就顺手把 DSH 拉起来
+    "open_after_start": False,  # 启动成功后自动打开 DSH 页面
+    "update_freq": "每次",     # 每次 / 每天 / 每周
+    "last_update_check": 0,    # 上次查更新的时间戳
+    "win_pos": "",             # 记住的窗口位置（"WxH+X+Y"）
 }
 
 DEFAULT_VERSIONS_DIR = os.path.join(LAUNCHER_DIR, "versions")

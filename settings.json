@@ -7,5 +7,16 @@
   "hide_cmd": true,
   "stop_on_exit": false,
   "keep_log": 2000,
-  "confirm_repair": true
+  "confirm_repair": true,
+  "theme": "dark",
+  "anim": "normal",
+  "density": "normal",
+  "alpha": 100,
+  "download_dir": "",
+  "ask_dl_dir": false,
+  "check_node": true,
+  "autostart": false,
+  "log_autoscroll": true,
+  "safe_mode": false,
+  "restore_after_safe": true
 }
