@@ -404,6 +404,14 @@ class Pill(tk.Canvas):
         self.delete("all")
 
 
+def human_bytes(n):
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return ("%.1f %s" % (n, unit)) if unit != "B" else ("%d B" % int(n))
+        n /= 1024.0
+
+
 class Toast(tk.Frame):
     """窗口内右下角的提示条：滑进来、停一会儿、滑出去；多个会往上叠。"""
 
@@ -945,6 +953,7 @@ class App:
         except Exception:
             pass
 
+        self.build_main()
         self.build_loading()
         self.root.after(80, self.pump)
         self.root.after(200, self.start_init)
@@ -962,24 +971,25 @@ class App:
 
     # ------------------------------------------------------------ 加载页
     def build_loading(self):
-        f = tk.Frame(self.root, bg=TITLE_BG)
-        f.pack(fill="both", expand=True)
+        """底部居中的小卡片 —— 不占整页，初始化完就收走。"""
+        f = tk.Frame(self.root, bg=TITLE_BG, highlightbackground="#3a3f47",
+                     highlightthickness=1)
+        f.place(relx=0.5, rely=1.0, anchor="s", y=-24, width=380, height=92)
         self.load_frame = f
-        box = tk.Frame(f, bg=TITLE_BG)
-        box.place(relx=0.5, rely=0.44, anchor="center")
-        self.ring = MineAnim(box, size=168, bg=TITLE_BG)
-        self.ring.pack()
-        tk.Label(box, text="PSL-ds启动器", bg=TITLE_BG, fg="#ffffff",
-                 font=(FONT, 19, "bold")).pack(pady=(28, 8))
-        self.load_text = tk.Label(box, text="正在启动中...", bg=TITLE_BG, fg="#9aa0a8",
-                                  font=(FONT, 11))
-        self.load_text.pack()
-        self.load_bar = Bar(box, bg=TITLE_BG, height=4, color=BLUE, track="#3a3f47")
-        self.load_bar.configure(width=280)
-        self.load_bar.pack(pady=(28, 0))
+        row = tk.Frame(f, bg=TITLE_BG)
+        row.pack(fill="both", expand=True, padx=14, pady=12)
+        self.ring = MineAnim(row, size=66, bg=TITLE_BG)
+        self.ring.pack(side="left")
+        col = tk.Frame(row, bg=TITLE_BG)
+        col.pack(side="left", fill="both", expand=True, padx=(14, 0))
+        tk.Label(col, text="PSL-ds启动器", bg=TITLE_BG, fg="#ffffff",
+                 font=(FONT, 12, "bold"), anchor="w").pack(fill="x")
+        self.load_text = tk.Label(col, text="正在启动中...", bg=TITLE_BG, fg="#9aa0a8",
+                                  font=(FONT, 10), anchor="w")
+        self.load_text.pack(fill="x", pady=(3, 0))
+        self.load_bar = Bar(col, bg=TITLE_BG, height=4, color=BLUE, track="#3a3f47")
+        self.load_bar.pack(fill="x", pady=(8, 0))
         self.load_bar.start_marquee()
-        tk.Label(f, text="", bg=TITLE_BG, fg="#5f646c",
-                 font=(FONT, 10)).place(relx=0.5, rely=0.90, anchor="center")
         self.ring.start()
         self._anim_t0 = time.time()
 
@@ -1030,7 +1040,8 @@ class App:
             self.load_frame.destroy()
             self.load_frame = None
         self.root.configure(bg=PAGE_BG)
-        self.build_main()
+        if not self.pages:
+            self.build_main()
         if getattr(self, "_cover", None) is not None:
             self._cover.lift()
         self._ready = True
@@ -1541,6 +1552,12 @@ class App:
                     self.show_plugins(m["summary"], m["rows"], m["err"])
                 elif k == "update":
                     self.show_update(m["text"], m.get("ok", True))
+                elif k == "dl_on":
+                    self.download_cover(m["version"])
+                elif k == "dl":
+                    self.dl_progress(m["size"], m["speed"], m["elapsed"])
+                elif k == "dl_off":
+                    self.dl_close()
                 elif k == "plugin_toggled":
                     self.toast("%s 已%s（重启 DSH 生效）" % (m["name"], "启用" if m["on"] else "禁用"),
                                "ok", 5000)
@@ -1930,24 +1947,116 @@ class App:
         C.save_config(self.cfg)
 
         def job():
-            self.say("开始安装 %s（大约50-1.8分钟）…" % v)
-            self.prog("正在下载 %s…" % v)
+            self.say("开始安装 %s…" % v)
+            self.q.put({"kind": "dl_on", "version": v})
             n = [0]
 
             def lg(s):
                 if "http fetch" in s:
                     n[0] += 1
-                    self.prog("正在下载 %s…　已获取 %d 包" % (v, n[0]))
+                    self.say("  已获取 %d 包" % n[0])
                 elif "added" in s and "packages" in s:
                     self.say("  " + s)
 
-            ok, msg = C.npm_install(v, lg)
+            try:
+                ok, msg = C.npm_install(v, lg, self._dl_prog)
+            finally:
+                self.q.put({"kind": "dl_off"})
             self.say(("完成：" if ok else "失败：") + msg)
             local = C.installed_versions()
             remote, err = C.fetch_remote()
             self.q.put({"kind": "versions", "local": local, "remote": remote, "err": err})
-            self.prog(None)
+            self.q.put({"kind": "toast",
+                        "text": ("%s 装好了" % v) if ok else ("装 %s 失败：%s" % (v, msg)),
+                        "level": "ok" if ok else "bad"})
         self.spawn(job, "install")
+
+    def _dl_prog(self, size, speed, elapsed):
+        self.q.put({"kind": "dl", "size": size, "speed": speed, "elapsed": elapsed})
+
+    def download_cover(self, version):
+        """下载小卡片：贴在中下方，不盖住页面。"""
+        self.dl_close(instant=True)
+        W, H = 420, 118
+        cv = tk.Frame(self.root, bg=TITLE_BG, highlightbackground="#3a3f47",
+                      highlightthickness=1)
+        y0 = -24
+        cv.place(relx=0.5, rely=1.0, anchor="s", y=y0 + H + 30, width=W, height=H)
+        box = tk.Frame(cv, bg=TITLE_BG)
+        box.pack(fill="both", expand=True, padx=14, pady=11)
+        top = tk.Frame(box, bg=TITLE_BG)
+        top.pack(fill="x")
+        tk.Label(top, text="正在下载 DSH", bg=TITLE_BG, fg="#f2f4f7",
+                 font=(FONT, 11, "bold")).pack(side="left")
+        tk.Label(top, text=version, bg=TITLE_BG, fg=BLUE,
+                 font=(MONO, 10)).pack(side="left", padx=(8, 0))
+        self.dl_pct = tk.Label(top, text="0%", bg=TITLE_BG, fg="#ffffff",
+                               font=(FONT, 13, "bold"))
+        self.dl_pct.pack(side="right")
+        self.dl_bar = Bar(box, bg=TITLE_BG, height=6, color=BLUE, track="#3a3f47")
+        self.dl_bar.pack(fill="x", pady=(9, 0))
+        self.dl_bar.set_fraction(0.0)
+        self.dl_info = tk.Label(box, text="正在连接…", bg=TITLE_BG, fg="#9aa3ad",
+                                font=(FONT, 9), anchor="w")
+        self.dl_info.pack(fill="x", pady=(7, 0))
+        self.dl_cover = cv
+        self._dl_t0 = time.time()
+        self._dl_ver = version
+
+        def slide(i=0, steps=9):
+            if getattr(self, "dl_cover", None) is not cv:
+                return
+            k = i / float(steps)
+            k = 1.0 - (1.0 - k) ** 3
+            cv.place_configure(y=int(y0 + H + 30 - (H + 30) * k))
+            if i < steps:
+                self.root.after(14, lambda: slide(i + 1, steps))
+
+        slide()
+
+    def dl_progress(self, size, speed, elapsed):
+        cv = getattr(self, "dl_cover", None)
+        if cv is None:
+            return
+        est = C.INSTALL_EST_BYTES
+        frac = min(1.0, size / float(est)) if est else 0.0
+        self.dl_pct.configure(text="%d%%" % int(frac * 100))
+        self.dl_bar.set_fraction(frac)
+        left = (est - size) / speed if speed > 1 else 0
+        info = "已下载 %s　·　%s/s　·　已用 %s" % (
+            human_bytes(size), human_bytes(speed), human_ms(int(elapsed * 1000)))
+        if left > 1 and frac < 1.0:
+            info += "　·　约剩 %s" % human_ms(int(left * 1000))
+        self.dl_info.configure(text=info)
+
+    def dl_close(self, instant=False):
+        cv = getattr(self, "dl_cover", None)
+        if cv is None:
+            return
+        self.dl_cover = None
+        if instant:
+            try:
+                cv.destroy()
+            except Exception:
+                pass
+            return
+        h = max(cv.winfo_height(), 100) + 30
+
+        def out(i=0, steps=7):
+            k = i / float(steps)
+            try:
+                cv.place_configure(y=int(h * (k ** 2)))
+            except Exception:
+                return
+            if i < steps:
+                self.root.after(14, lambda: out(i + 1, steps))
+            else:
+                try:
+                    cv.destroy()
+                except Exception:
+                    pass
+
+        out()
 
     def ensure_runnable(self, version):
         info = self.local.get(version)
