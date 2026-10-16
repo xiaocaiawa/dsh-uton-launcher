@@ -1613,6 +1613,9 @@ class App:
         self.remote = None
         self.remote_err = ""
         self.busy = set()
+        self._pending_tag = ""
+        self._auto_upd = False
+        C.clean_old_self()
         self.last_status = {}
         self.rows = []
         self._n = 0
@@ -2300,18 +2303,87 @@ class App:
                  font=(FONT, 10)).pack(side="left", padx=(10, 0))
         Btn(r, "检查更新", self.on_check_update, "plain", padx=14,
             pady=6).pack(side="left", padx=(16, 0))
+        self.btn_upd = Btn(r, "自动更新", self.on_self_update, "main", padx=14, pady=6)
+        self.btn_upd.pack(side="left", padx=(8, 0))
         self.upd_text = tk.Label(r, text="", bg=CARD, fg=DIM, font=(FONT, 10))
         self.upd_text.pack(side="left", padx=(12, 0))
-        note("走 git 查仓库的版本标签（不用梯子）")
+        note("点「自动更新」= 拉源码 + 本机重新打包 + 换掉自己重启（约 1 分钟）")
 
         return page
 
-    def show_update(self, text, ok=True):
+    def show_update(self, text, ok=True, tag=None):
         try:
             self.upd_text.configure(text=text, fg=(DIM if ok else BAD))
         except tk.TclError:
             return
+        new = bool(tag) and str(tag).lstrip("vV") != C.APP_VER
+        self._pending_tag = str(tag) if new else ""
+        btn = getattr(self, "btn_upd", None)
+        if btn is not None:
+            try:
+                if new:
+                    btn.set_text("自动更新到 " + str(tag))
+                btn.set_enabled(new)
+            except Exception:
+                pass
+        if new:
+            self.toast("有新版本 %s，点「自动更新」就能装上" % tag, "ok", 5200)
         self.say(text)
+        if getattr(self, "_auto_upd", False):
+            self._auto_upd = False
+            if new:
+                self.root.after(400, self.on_self_update)
+            else:
+                self.toast("已经是最新的，不用更新", "info")
+
+    def on_self_update(self):
+        tag = getattr(self, "_pending_tag", "") or ""
+        if not tag:
+            self._auto_upd = True
+            self.toast("先查一下仓库有没有新版本…", "info")
+            self.on_check_update()
+            return
+        self._auto_upd = False
+        ready, msg = C.self_update_ready()
+        if not ready:
+            self.show_report([("更新前检查", msg)], "自动更新还差条件", "自动更新",
+                             "把上面这条补上，再点一次「自动更新」")
+            return
+        Ask(self.root, "自动更新到 " + tag,
+            "会取 %s 的源码 → 在本机重新打包（约 1 分钟）→ 换掉自己重启。"
+            "期间别关这个窗口。" % tag,
+            lambda: self._start_self_update(tag), ok_text="开始更新",
+            cancel_text="算了")
+
+    def _start_self_update(self, tag):
+        self.launch_cover("正在自动更新到 %s" % tag)
+        self.prog("准备更新…", 0.05)
+
+        def job():
+            lg = lambda t: self.say(t)
+            prg = lambda v: self.prog("正在打包新版本…", v)
+            ok, msg = C.fetch_sources(tag, lg)
+            if not ok:
+                self._update_fail(msg)
+                return
+            exe, err = C.build_exe(lg, prg)
+            if not exe:
+                self._update_fail(err)
+                return
+            self.prog(None, None)
+            ok, msg = C.install_self(exe, lg)
+            if not ok:
+                self._update_fail(msg)
+                return
+            self.q.put({"kind": "quit"})
+
+        self.spawn(job, "update")
+
+    def _update_fail(self, msg):
+        self.q.put({"kind": "cover_off"})
+        self.q.put({"kind": "prog", "text": None})
+        self.q.put({"kind": "report", "rows": [], "err": msg, "title": "自动更新没成功",
+                    "sub": "老版本还在，不影响使用"})
 
     def on_setting(self, key, value):
         self.cfg[key] = value
@@ -2646,7 +2718,8 @@ class App:
             return
         cur = C.APP_VER
         if tag and tag.lstrip("vV") != cur:
-            self.q.put({"kind": "update", "text": "有新版本 %s（当前 v%s）" % (tag, cur), "ok": True})
+            self.q.put({"kind": "update", "text": "有新版本 %s（当前 v%s）" % (tag, cur),
+                        "ok": True, "tag": tag})
         elif tag:
             self.q.put({"kind": "update", "text": "已是最新（v%s）" % cur, "ok": True})
         else:
@@ -2804,7 +2877,7 @@ class App:
                 elif k == "plugins":
                     self.show_plugins(m["summary"], m["rows"], m["err"])
                 elif k == "update":
-                    self.show_update(m["text"], m.get("ok", True))
+                    self.show_update(m["text"], m.get("ok", True), m.get("tag"))
                 elif k == "dl_on":
                     self.download_cover(m["version"])
                 elif k == "dl":
@@ -2826,6 +2899,9 @@ class App:
                     self.cover_text(m["text"])
                 elif k == "cover_off":
                     self.close_cover()
+                elif k == "quit":
+                    self.save_win_pos()
+                    self.root.after(700, self.root.destroy)
                 elif k == "started":
                     self.refresh_status()
                     if not m.get("quiet"):

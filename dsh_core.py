@@ -100,10 +100,10 @@ def find_npm():
     return find_first(NPM_CANDIDATES)
 
 
-def run(args, timeout=20, cwd=None):
+def run(args, timeout=20, cwd=None, env=None):
     """跑一条命令，返回 (returncode, 输出文字)。不弹窗。"""
     try:
-        p = subprocess.run(args, capture_output=True, timeout=timeout, cwd=cwd,
+        p = subprocess.run(args, capture_output=True, timeout=timeout, cwd=cwd, env=env,
                            creationflags=NO_WINDOW)
         out = (p.stdout or b"") + (p.stderr or b"")
         try:
@@ -827,7 +827,7 @@ def scan_plugins(progress=None):
 
 # ---------------------------------------------------------------- 配置
 
-APP_VER = "1.0.2"
+APP_VER = "1.0.3"
 REPO = "xiaocaiawa/dsh-uton-launcher"
 SETTINGS_PATH = os.path.join(os.path.expanduser("~"), "dsh-launcher", "settings.json")
 DEFAULT_SETTINGS = {
@@ -975,6 +975,207 @@ def remote_tags(timeout=25):
     if tags:
         tags.sort(key=lambda t: [int(x) for x in re.findall(r"\d+", t)] or [0])
     return (tags[-1] if tags else None), sha, None
+
+
+# ---------------------------------------------------------------- 自动更新自己
+
+SELF_FILES = ("dsh_launcher.py", "dsh_core.py", "dsh_float.py", "mine_editor.py",
+              "mine.json", "README.md", "说明.txt")
+
+
+def self_exe():
+    """启动器自己的 exe 路径；源码直接跑（没打包）时返回 None。"""
+    if getattr(sys, "frozen", False):
+        return sys.executable
+    return None
+
+
+def find_python():
+    """找一个能跑 PyInstaller 的 Python（py 优先，绕开微软商店的假壳子）。"""
+    cands = []
+    for name in ("py", "python", "python3"):
+        p = shutil.which(name)
+        if p:
+            cands.append(p)
+    local = os.environ.get("LOCALAPPDATA", "")
+    if local:
+        cands.append(os.path.join(local, "Programs", "Python"))
+    for c in cands:
+        if c and os.path.isfile(c):
+            return c
+    for c in cands:
+        if c and os.path.isdir(c):
+            for name in sorted(os.listdir(c), reverse=True):
+                exe = os.path.join(c, name, "python.exe")
+                if os.path.isfile(exe):
+                    return exe
+    return None
+
+
+def self_update_ready():
+    """自更新前置检查，返回 (能不能, 一句话说明)。"""
+    if not self_exe():
+        return False, "当前是源码直接跑的，不是 .exe，没法替换自己"
+    if not os.path.isdir(os.path.join(LAUNCHER_DIR, ".git")):
+        return False, "%s 不是 git 仓库" % LAUNCHER_DIR
+    if not find_git():
+        return False, "没找到 git"
+    py = find_python()
+    if not py:
+        return False, "没找到 Python"
+    rc, out = run([py, "-m", "PyInstaller", "--version"], timeout=60)
+    if rc != 0:
+        return False, "这台机器没装 PyInstaller（py -m pip install pyinstaller 就能装）"
+    ver = (out or "").strip().splitlines()
+    return True, "git ✓　Python ✓　PyInstaller %s ✓" % (ver[-1] if ver else "?")
+
+
+def fetch_sources(tag="", log=None):
+    """把远端最新源码取到工作目录。只覆盖代码文件，不动 settings/config/versions。"""
+    def note(t):
+        if log:
+            log(t)
+    git = find_git()
+    if not git:
+        return False, "没找到 git"
+    if not os.path.isdir(os.path.join(LAUNCHER_DIR, ".git")):
+        return False, "%s 不是 git 仓库" % LAUNCHER_DIR
+    note("问仓库要最新代码…")
+    rc, out = run([git, "-C", LAUNCHER_DIR, "fetch", "--tags", "--force", "origin"],
+                  timeout=150)
+    if rc != 0:
+        return False, "拉取仓库失败：" + (out or "").strip()[-300:]
+    ref = tag or "origin/main"
+    note("取出 %s 的源码…" % ref)
+    rc, out = run([git, "-C", LAUNCHER_DIR, "checkout", ref, "--"] + list(SELF_FILES),
+                  timeout=60)
+    if rc != 0:
+        return False, "取出 %s 失败：%s" % (ref, (out or "").strip()[-300:])
+    note("源码已换到 %s" % ref)
+    return True, ref
+
+
+def build_exe(log=None, prog=None):
+    """在本机重新打包启动器，返回 (新 exe 路径, 错误说明)。"""
+    def note(t):
+        if log:
+            log(t)
+    py = find_python()
+    if not py:
+        return None, "没找到 Python"
+    out_dir = os.path.join(LAUNCHER_DIR, "build-self")
+    assets = os.path.join(LAUNCHER_DIR, "assets")
+    args = [py, "-m", "PyInstaller", "--onefile", "--noconsole", "--clean",
+            "--name", "DSHLauncher",
+            "--hidden-import", "tkinter", "--hidden-import", "tkinter.font",
+            "--hidden-import", "tkinter.ttk",
+            "--add-data", assets + os.pathsep + "assets",
+            "--distpath", out_dir,
+            "--workpath", os.path.join(out_dir, "work"),
+            "--specpath", out_dir,
+            os.path.join(LAUNCHER_DIR, "dsh_launcher.py")]
+    note("开始打包（大概 1 分钟，别关这个窗口）…")
+    if prog:
+        prog(0.2)
+    # env 必须洗干净：启动器自己是 PyInstaller 打的，_PYI_* 传下去会打出坏包
+    rc, out = run(args, timeout=900, env=clean_env())
+    exe = os.path.join(out_dir, "DSHLauncher.exe")
+    if rc != 0 or not os.path.isfile(exe):
+        return None, "打包失败：\n" + (out or "").strip()[-600:]
+    size = os.path.getsize(exe)
+    if size < 10 * 1024 * 1024:
+        return None, "打出来只有 %.1f MB，是坏包（正常 11 MB 以上），先别用" % (size / 1048576.0)
+    note("打包完成：%s（%.2f MB）" % (os.path.basename(exe), size / 1048576.0))
+    return exe, ""
+
+
+def install_self(new_exe, log=None):
+    """把新 exe 换到自己身上并重启。返回 (成不成, 说明)。"""
+    def note(t):
+        if log:
+            log(t)
+    exe = self_exe()
+    if not exe:
+        return False, "当前不是 .exe，没法替换自己"
+    if not new_exe or not os.path.isfile(new_exe):
+        return False, "新版本文件不在"
+    old = exe + ".old"
+    try:
+        if os.path.exists(old):
+            os.remove(old)
+    except Exception:
+        pass
+    try:
+        os.replace(exe, old)
+    except Exception as e:
+        note("先改名失败（%s），改用延迟替换" % e)
+        return _install_by_cmd(new_exe, exe, note)
+    try:
+        shutil.copy2(new_exe, exe)
+    except Exception as e:
+        try:
+            os.replace(old, exe)
+        except Exception:
+            pass
+        return False, "复制新版失败：%s" % e
+    try:
+        subprocess.Popen([exe], close_fds=True)
+    except Exception as e:
+        return False, "新版已就位，但启动失败：%s（手动开 %s 就行）" % (e, exe)
+    note("新版已就位，马上重启")
+    return True, "已替换并重启"
+
+
+def clean_old_self():
+    """上次自更新留下的 .old 后缀文件，能删就删。"""
+    exe = self_exe()
+    if not exe:
+        return
+    old = exe + ".old"
+    try:
+        if os.path.exists(old):
+            os.remove(old)
+    except Exception:
+        pass
+
+
+def _short_path(p):
+    """尽量取 8.3 短路径 —— 批处理里出现中文路径容易翻车。"""
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(600)
+        n = ctypes.windll.kernel32.GetShortPathNameW(p, buf, 600)
+        if n and buf.value and buf.value.isascii():
+            return buf.value
+    except Exception:
+        pass
+    return p
+
+
+def _install_by_cmd(new_exe, exe, note):
+    """兜底：写一个纯 ASCII 的批处理，等本进程退出后替换再重启。"""
+    cmd = os.path.join(LAUNCHER_DIR, "_self_update.cmd")
+    src, dst = _short_path(new_exe), _short_path(exe)
+    body = "\r\n".join([
+        "@echo off",
+        "rem DSH launcher self-update",
+        "ping -n 4 127.0.0.1 >nul",
+        'copy /y "%s" "%s" >nul' % (src, dst),
+        'start "" "%s"' % dst,
+        'del "%~f0"',
+        "",
+    ])
+    try:
+        with open(cmd, "w", encoding="ascii", errors="replace") as f:
+            f.write(body)
+    except Exception as e:
+        return False, "写更新脚本失败：%s" % e
+    note("改用批处理延迟替换")
+    try:
+        subprocess.Popen(["cmd", "/c", cmd], creationflags=NO_WINDOW, close_fds=True)
+    except Exception as e:
+        return False, "启动更新脚本失败：%s" % e
+    return True, "已交给后台脚本替换"
 
 
 DEFAULT_CONFIG = {
