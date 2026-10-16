@@ -827,7 +827,7 @@ def scan_plugins(progress=None):
 
 # ---------------------------------------------------------------- 配置
 
-APP_VER = "1.0.3"
+APP_VER = "1.0.4"
 REPO = "xiaocaiawa/dsh-uton-launcher"
 SETTINGS_PATH = os.path.join(os.path.expanduser("~"), "dsh-launcher", "settings.json")
 DEFAULT_SETTINGS = {
