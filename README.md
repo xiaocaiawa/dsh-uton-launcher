@@ -1,5 +1,9 @@
 # DSH 启动器
 
+###提示
+
+项目由deepseek制作
+
 DeepSeek Harness（DSH）的可视化启动器 —— 一个 exe，管住版本、插件和本地服务。
 
 ![服务页](preview/2-service.png)
