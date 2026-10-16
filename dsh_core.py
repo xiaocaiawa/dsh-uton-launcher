@@ -721,6 +721,74 @@ def scan_plugins(progress=None):
 
 # ---------------------------------------------------------------- 配置
 
+APP_VER = "1.0.0"
+REPO = "xiaocaiawa/dsh-uton-launcher"
+SETTINGS_PATH = os.path.join(os.path.expanduser("~"), "dsh-launcher", "settings.json")
+DEFAULT_SETTINGS = {
+    "registry": "npmmirror",
+    "compat": False,
+    "open_mode": "browser",
+    "check_update": True,
+}
+
+
+def load_settings():
+    cfg = dict(DEFAULT_SETTINGS)
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            cfg.update(data)
+    except Exception:
+        pass
+    return cfg
+
+
+def save_settings(cfg):
+    try:
+        d = os.path.dirname(SETTINGS_PATH)
+        if d and not os.path.isdir(d):
+            os.makedirs(d)
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+def find_git():
+    for p in (r"D:\Git\cmd\git.exe",
+              r"C:\Program Files\Git\cmd\git.exe",
+              os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Programs\Git\cmd\git.exe")):
+        if p and os.path.isfile(p):
+            return p
+    return shutil.which("git")
+
+
+def remote_tags(timeout=25):
+    """git ls-remote 查远端标签，返回 (最新标签, main 的 sha, 错误)。"""
+    git = find_git()
+    if not git:
+        return None, None, "没找到 git"
+    code, text = run([git, "ls-remote", "--tags", "--heads",
+                      "https://github.com/" + REPO], timeout=timeout)
+    if code != 0:
+        return None, None, (text.strip()[:200] or "git ls-remote 失败")
+    tags, sha = [], None
+    for ln in text.splitlines():
+        parts = ln.split()
+        if len(parts) != 2:
+            continue
+        h, ref = parts
+        if ref.startswith("refs/tags/") and not ref.endswith("^{}"):
+            tags.append(ref[len("refs/tags/"):])
+        elif ref == "refs/heads/main":
+            sha = h
+    if tags:
+        tags.sort(key=lambda t: [int(x) for x in re.findall(r"\d+", t)] or [0])
+    return (tags[-1] if tags else None), sha, None
+
+
 DEFAULT_CONFIG = {
     "pick_mode": "auto",      # auto = 追最新正式版；manual = 用下面选的版本
     "update_mode": "manual",  # auto = 启动前自动装新版；manual = 只在点按钮时装
