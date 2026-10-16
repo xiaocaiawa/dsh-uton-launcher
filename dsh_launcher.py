@@ -746,7 +746,8 @@ class NavItem(tk.Frame):
 
 class App:
     NAVS = [("service", "服务", "▶"), ("version", "版本与更新", "⬇"),
-            ("plugins", "插件体检", "☰"), ("support", "支持与反馈", "★")]
+            ("plugins", "插件体检", "☰"), ("support", "支持与反馈", "★"),
+            ("settings", "设置", "⚙")]
 
     def __init__(self, root):
         self.root = root
@@ -963,12 +964,14 @@ class App:
 
     # ------------------------------------------------------------ 三个页
     def build_pages(self, parent):
+        self.cfg = C.load_settings()
         self.content = tk.Frame(parent, bg=PAGE_BG)
         self.content.pack(side="left", fill="both", expand=True)
         self.pages = {"service": self.page_service(),
                       "version": self.page_version(),
                       "plugins": self.page_plugins(),
-                      "support": self.page_support()}
+                      "support": self.page_support(),
+                      "settings": self.page_settings()}
         for p in self.pages.values():
             p.place(x=0, y=0, relwidth=1, relheight=1)
         self.pages["service"].lift()
@@ -1149,6 +1152,86 @@ class App:
         except Exception as e:
             self.say("复制失败：%s" % e)
 
+    def page_settings(self):
+        page = tk.Frame(self.content, bg=PAGE_BG)
+        c = Card(page, "设置")
+        c.pack(fill="x", padx=20, pady=18)
+        body = c.body
+
+        def row(label):
+            r = tk.Frame(body, bg=CARD)
+            r.pack(fill="x")
+            tk.Label(r, text=label, bg=CARD, fg=INK, font=(FONT, 11),
+                     width=10, anchor="w").pack(side="left")
+            return r
+
+        def note(text):
+            tk.Label(body, text=text, bg=CARD, fg=FAINT,
+                     font=(FONT, 9)).pack(anchor="w", pady=(4, 16))
+
+        r = row("下载源")
+        self.seg_reg = Segmented(r, [("npmmirror 国内快", "npmmirror"), ("官方 npm", "npm")],
+                                 self.cfg.get("registry", "npmmirror"),
+                                 lambda v: self.on_setting("registry", v))
+        self.seg_reg.pack(side="left", padx=(10, 0))
+        note("下载 DSH 版本时从哪个源拉包")
+
+        r = row("打开方式")
+        self.seg_open = Segmented(r, [("本地浏览器", "browser"), ("单独窗口", "window"),
+                                      ("APP 内运行", "app")],
+                                  self.cfg.get("open_mode", "browser"),
+                                  lambda v: self.on_setting("open_mode", v))
+        self.seg_open.pack(side="left", padx=(10, 0))
+        note("点「打开网页」时怎么打开")
+
+        r = row("兼容模式")
+        self.seg_compat = Segmented(r, [("关 动画全速", "off"), ("开 省性能", "on")],
+                                    "on" if self.cfg.get("compat") else "off",
+                                    lambda v: self.on_setting("compat", v == "on"))
+        self.seg_compat.pack(side="left", padx=(10, 0))
+        note("卡的时候打开：降低动画帧率、关掉镰子动画")
+
+        r = row("启动器更新")
+        tk.Label(r, text="当前 v" + C.APP_VER, bg=CARD, fg=DIM,
+                 font=(FONT, 10)).pack(side="left", padx=(10, 0))
+        Btn(r, "检查更新", self.on_check_update, "plain", padx=14,
+            pady=6).pack(side="left", padx=(16, 0))
+        self.upd_text = tk.Label(r, text="", bg=CARD, fg=DIM, font=(FONT, 10))
+        self.upd_text.pack(side="left", padx=(12, 0))
+        note("走 git 查仓库的版本标签（不用梯子）")
+
+        return page
+
+    def show_update(self, text, ok=True):
+        try:
+            self.upd_text.configure(text=text, fg=(DIM if ok else BAD))
+        except tk.TclError:
+            return
+        self.say(text)
+
+    def on_setting(self, key, value):
+        self.cfg[key] = value
+        good, err = C.save_settings(self.cfg)
+        self.say(("设置 %s = %s" % (key, value)) if good
+                 else ("设置保存失败：%s" % err))
+
+    def on_check_update(self):
+        self.spawn(self._do_check_update, "update")
+
+    def _do_check_update(self):
+        self.q.put({"kind": "status", "text": "检查启动器更新…"})
+        tag, sha, err = C.remote_tags()
+        if err:
+            self.q.put({"kind": "update", "text": "查不到：%s" % err, "ok": False})
+            return
+        cur = C.APP_VER
+        if tag and tag.lstrip("vV") != cur:
+            self.q.put({"kind": "update", "text": "有新版本 %s（当前 v%s）" % (tag, cur), "ok": True})
+        elif tag:
+            self.q.put({"kind": "update", "text": "已是最新（v%s）" % cur, "ok": True})
+        else:
+            self.q.put({"kind": "update", "text": "仓库里还没有版本标签", "ok": True})
+
     def page_plugins(self):
         page = tk.Frame(self.content, bg=PAGE_BG)
         c = Card(page, "插件体检")
@@ -1283,6 +1366,8 @@ class App:
                     self.set_controls(m["name"], m["on"])
                 elif k == "plugins":
                     self.show_plugins(m["summary"], m["rows"], m["err"])
+                elif k == "update":
+                    self.show_update(m["text"], m.get("ok", True))
                 elif k == "report":
                     self.show_report(m["rows"], m["err"])
                 elif k == "cover_text":
