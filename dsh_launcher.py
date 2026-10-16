@@ -1419,6 +1419,12 @@ class App:
         self.btn_recheck = Btn(head, "重新检测", self.on_plugin_check, "plain", padx=14, pady=6,
                                font=(FONT, 10))
         self.btn_recheck.pack(side="right")
+        self.btn_trust = Btn(head, "信任 / 取消", self.on_trust_plugin, "plain", padx=14, pady=6,
+                             font=(FONT, 10))
+        self.btn_trust.pack(side="right", padx=(8, 0))
+        self.btn_toggle = Btn(head, "启用 / 禁用", self.on_toggle_plugin, "plain", padx=14, pady=6,
+                              font=(FONT, 10))
+        self.btn_toggle.pack(side="right", padx=(8, 0))
         tk.Label(head, text="",
                  bg=CARD, fg=FAINT, font=(FONT, 10)).pack(side="right", padx=(0, 16))
         cols = ("name", "level", "bundles", "spec", "where")
@@ -1535,6 +1541,14 @@ class App:
                     self.show_plugins(m["summary"], m["rows"], m["err"])
                 elif k == "update":
                     self.show_update(m["text"], m.get("ok", True))
+                elif k == "plugin_toggled":
+                    self.toast("%s 已%s（重启 DSH 生效）" % (m["name"], "启用" if m["on"] else "禁用"),
+                               "ok", 5000)
+                    self.root.after(600, self.on_plugin_check)
+                elif k == "plugin_trusted":
+                    self.toast("%s 已%s信任" % (m["name"], "" if m["on"] else "取消"), "ok", 4200)
+                elif k == "toast":
+                    self.toast(m["text"], m.get("level", "info"))
                 elif k == "report":
                     self.show_report(m["rows"], m["err"])
                 elif k == "cover_text":
@@ -1866,6 +1880,43 @@ class App:
             finally:
                 self.prog(None)
         self.spawn(job, "check")
+
+    def _selected_plugin(self):
+        sel = self.tree.selection()
+        if not sel:
+            self.toast("先在表格里选一个插件", "warn")
+            return None
+        return self.tree.item(sel[0], "values")[0]
+
+    def on_toggle_plugin(self):
+        name = self._selected_plugin()
+        if not name:
+            return
+        on = name not in C.profile_bundles()
+
+        def job():
+            ok, err = C.set_bundle(name, on)
+            if ok:
+                self.q.put({"kind": "plugin_toggled", "name": name, "on": on})
+            else:
+                self.q.put({"kind": "toast", "text": "改不动：%s" % err, "level": "bad"})
+
+        self.spawn(job, "plug")
+
+    def on_trust_plugin(self):
+        name = self._selected_plugin()
+        if not name:
+            return
+        on = name not in C.trusted_list()
+
+        def job():
+            ok, err = C.set_trusted(name, on)
+            if ok:
+                self.q.put({"kind": "plugin_trusted", "name": name, "on": on})
+            else:
+                self.q.put({"kind": "toast", "text": "改不动：%s" % err, "level": "bad"})
+
+        self.spawn(job, "plug")
 
     def on_plugin_check(self):
         self.plugin_check_job()

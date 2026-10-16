@@ -5,9 +5,9 @@ npm : D:\NODEjsmiao\npm.cmd
 远端 latest=0.2.0-rc.2 alpha=0.2.1-alpha.5 共 34 个
 排序前 5： ['0.2.1-alpha.5', '0.2.1-alpha.4', '0.2.1-alpha.3', '0.2.1-alpha.2', '0.2.1-alpha.1']
 峰谷： 空闲时段 半价 | 窗口 [{'start': 1, 'end': 4}, {'start': 6, 'end': 10}] | 下次切换（北京） 2026-10-19 09:00:00+08:00
-UTC 现在： 2026-10-16 14:01:38.575234+00:00
-插件：共 17，有问题 ['dsh-effort-switcher', 'dsh-lightning2', 'dsh-plugin-wallpaper-engine']，有警告 无
+UTC 现在： 2026-10-16 14:12:27.484118+00:00
+插件：共 17，有问题 ['dsh-effort-switcher', 'dsh-lightning2', 'dsh-plugin-wallpaper-engine', 'dsh-quote']，有警告 无
 进度回调收到 17 次，最后一次 17/17
 profile：C:\Users\xiaocai\.dsh\profiles\web
-依赖 17 个，打包清单 17 项
+依赖 17 个，打包清单 16 项
 宿主：宿主在 http://127.0.0.1:3080 上活着（首页要登录，返回 401）

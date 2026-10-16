@@ -10,6 +10,7 @@
 另外附带插件体检的检测逻辑（原程序 C:\\Users\\xiaocai\\dsh-plugin-check\\plugin_check.py）。
 """
 
+import io
 import json
 import os
 import re
@@ -417,8 +418,28 @@ def fetch_remote(timeout=15):
         return None, "%s: %s" % (type(e).__name__, e)
 
 
-def npm_install(version, log):
-    """把某个版本装到 versions\\<版本>\\。log 是 callable(str)。"""
+def dir_size(path):
+    """目录总字节数（拿不到的大小忽略）。"""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except Exception:
+                pass
+    return total
+
+
+# 装一个版本大概这么大（用来算进度百分比；装完会按真实值校正）
+INSTALL_EST_BYTES = 110 * 1024 * 1024
+
+
+def npm_install(version, log, prog=None):
+    """把某个版本装到 versions\\<版本>\\。
+
+    log  : callable(str)          日志
+    prog : callable(size, speed, eta)  下载进度（字节 / 字节每秒 / 已用时秒）
+    """
     npm = find_npm()
     if not npm:
         return False, "找不到 npm.cmd"
@@ -433,9 +454,23 @@ def npm_install(version, log):
                              creationflags=NO_WINDOW, cwd=target)
     except Exception as e:
         return False, "%s: %s" % (type(e).__name__, e)
+    t0 = time.time()
+    last_t = t0
+    last_b = 0
+    if prog:
+        prog(0, 0.0, 0.0)
     for raw in p.stdout:
         log(raw.decode("utf-8", errors="replace").rstrip())
+        if prog:
+            now = time.time()
+            if now - last_t >= 0.7:
+                size = dir_size(target)
+                speed = (size - last_b) / max(0.001, now - last_t)
+                prog(size, speed, now - t0)
+                last_b, last_t = size, now
     p.wait()
+    if prog:
+        prog(dir_size(target), 0.0, time.time() - t0)
     if p.returncode != 0:
         return False, "npm 退出码 %s" % p.returncode
     got = _version_from_dir(os.path.join(target, "node_modules", "@deepseek-ai", "dsh"))
@@ -617,6 +652,75 @@ def probe_host():
     if code == 401:
         return True, "宿主在 %s 上活着（首页要登录，返回 401）" % BASE_URL
     return False, "宿主没答应：%s" % extra
+
+
+PROFILE_JSON = os.path.join(HOME, ".dsh", "profiles", "web", "package.json")
+
+
+def load_profile():
+    """读 profile 的 package.json（拿不到就 None）。"""
+    try:
+        with io.open(PROFILE_JSON, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def profile_bundles():
+    """当前启用的 bundle 列表。"""
+    d = load_profile() or {}
+    return list(((d.get("dsh") or {}).get("profile") or {}).get("bundles") or [])
+
+
+def _write_profile(d):
+    try:
+        shutil.copy2(PROFILE_JSON, PROFILE_JSON + ".bak")
+        with io.open(PROFILE_JSON, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+    except Exception as e:
+        return False, str(e)
+    return True, ""
+
+
+def set_bundle(name, on):
+    """启用 / 禁用插件：加进或移出 dsh.profile.bundles。改前自动备份 .bak。"""
+    d = load_profile()
+    if not d:
+        return False, "读不到 profile/package.json"
+    prof = dict((d.get("dsh") or {}).get("profile") or {})
+    bundles = list(prof.get("bundles") or [])
+    if on:
+        if name in bundles:
+            return True, ""
+        if name not in (d.get("dependencies") or {}):
+            return False, "%s 还没装" % name
+        bundles.append(name)
+    else:
+        if name not in bundles:
+            return True, ""
+        bundles = [b for b in bundles if b != name]
+    prof["bundles"] = bundles
+    d.setdefault("dsh", {})["profile"] = prof
+    return _write_profile(d)
+
+
+def trusted_list():
+    d = load_profile() or {}
+    return list(d.get("trustedDependencies") or [])
+
+
+def set_trusted(name, on):
+    """信任 / 取消信任某个插件（写 trustedDependencies）。"""
+    d = load_profile()
+    if not d:
+        return False, "读不到 profile/package.json"
+    lst = list(d.get("trustedDependencies") or [])
+    if on and name not in lst:
+        lst.append(name)
+    elif not on:
+        lst = [x for x in lst if x != name]
+    d["trustedDependencies"] = lst
+    return _write_profile(d)
 
 
 def scan_plugins(progress=None):
